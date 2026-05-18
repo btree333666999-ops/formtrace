@@ -257,6 +257,18 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
   transition: background .1s, color .1s;
 }
 .bb-del-btn:hover { background: #552222; color: #ff8888; border-color: #884444; }
+.bb-crop-btn {
+  padding: 3px 8px; font-size: 11px; background: none;
+  border: 1px solid var(--border); border-radius: 3px;
+  color: var(--text-dim); cursor: pointer; white-space: nowrap;
+  transition: background .1s, color .1s;
+}
+.bb-crop-btn:hover { background: var(--btn-hover); color: var(--text); }
+.bb-crop-apply { border-color: #4a9eff; color: #4a9eff; }
+.bb-crop-apply:hover { background: #1a3a5a; color: #7ac0ff; border-color: #7ac0ff; }
+.bb-crop-cancel:hover { background: var(--btn-hover); color: var(--text); }
+.bb-crop-reset { border-color: #88aa44; color: #aacc66; }
+.bb-crop-reset:hover { background: #2a3a14; color: #ccee88; border-color: #ccee88; }
 .bb-reset-btn {
   padding: 3px 8px; font-size: 13px; background: none;
   border: 1px solid var(--border); border-radius: 3px;

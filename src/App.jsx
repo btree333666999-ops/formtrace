@@ -425,12 +425,10 @@ function drawCone(ctx,cx,cy,sc,style,ep=.3){
   const ey=r=>r*(.18+ep*.45)
   if(style==='shading')_gs(ctx,cx+bR*.1,bY+sc*.02,bR*.88,bR*.1)
   if(style==='shading'){
-    ctx.beginPath();ctx.moveTo(cx,tY);ctx.lineTo(cx-bR,bY);ctx.lineTo(cx,bY);ctx.closePath()
-    const gL=ctx.createLinearGradient(cx-bR,0,cx,0);gL.addColorStop(0,'#7a7672');gL.addColorStop(1,'#c8c4c0')
-    ctx.fillStyle=gL;ctx.fill()
-    ctx.beginPath();ctx.moveTo(cx,tY);ctx.lineTo(cx+bR,bY);ctx.lineTo(cx,bY);ctx.closePath()
-    const gR=ctx.createLinearGradient(cx,0,cx+bR,0);gR.addColorStop(0,'#ffffff');gR.addColorStop(1,'#d0ccc8')
-    ctx.fillStyle=gR;ctx.fill()
+    ctx.beginPath();ctx.moveTo(cx,tY);ctx.lineTo(cx-bR,bY);ctx.lineTo(cx+bR,bY);ctx.closePath()
+    const g=ctx.createRadialGradient(cx-bR*.22,tY+sc*.28,sc*.02,cx+bR*.35,bY,bR*1.38)
+    g.addColorStop(0,'#ffffff');g.addColorStop(.22,'#ece8e2');g.addColorStop(.54,'#b4b0aa');g.addColorStop(1,'#726e6a')
+    ctx.fillStyle=g;ctx.fill()
   } else if(style!=='outline'){
     ctx.beginPath();ctx.moveTo(cx,tY);ctx.lineTo(cx-bR,bY);ctx.lineTo(cx+bR,bY);ctx.closePath()
     ctx.fillStyle=style==='flat'?'#d0ccc8':'hsl(30,42%,85%)';ctx.fill()
@@ -441,10 +439,6 @@ function drawCone(ctx,cx,cy,sc,style,ep=.3){
   ctx.beginPath();ctx.ellipse(cx,bY,bR,ey(bR),0,0,Math.PI*2)
   if(style!=='outline'){ctx.fillStyle=style==='shading'?'#b8b4b0':'#c8c4c0';ctx.fill()}
   ctx.strokeStyle=SK;ctx.lineWidth=1.5;ctx.stroke()
-  if(style==='shading'){
-    ctx.beginPath();ctx.moveTo(cx+bR*.04,tY);ctx.lineTo(cx+bR*.04,bY)
-    ctx.strokeStyle='rgba(255,255,255,.28)';ctx.lineWidth=.9;ctx.stroke()
-  }
 }
 
 function clipLineToBBox(x1,y1,x2,y2,minX,minY,maxX,maxY){
@@ -643,6 +637,9 @@ export default function App() {
   const [practiceObject,setPracticeObject] = useState(null)
   const [practiceOrbit,setPracticeOrbit] = useState({rx:.3,ry:.2,rz:0,zoom:1})
   const [refImageSize,setRefImageSize]   = useState(null)    // {w,h}|null
+  const [cropMode,setCropMode]           = useState(false)
+  const [cropRect,setCropRect]           = useState(null)    // {x1,y1,x2,y2} px in fitDims space
+  const [appliedCrop,setAppliedCrop]     = useState(null)
   const [showShortcutPanel,setShowShortcutPanel] = useState(false)
   const [scLearning,setScLearning]       = useState(null)
   const [shortcuts,setShortcuts]         = useState(()=>{
@@ -686,6 +683,7 @@ export default function App() {
 
   const photoBakedRef = useRef(false)
   const practiceOverlayRef = useRef(null)  // visible DOM canvas on top of 3D
+  const photoOverlayRef   = useRef(null)  // drawing overlay on photo panel
   const [practiceDrawMode, setPracticeDrawMode] = useState(true)
 
   const [toolPositions,setToolPositions]=useState(()=>{try{return JSON.parse(localStorage.getItem('tool-positions')||'{}')}catch{return{}}})
@@ -821,12 +819,18 @@ export default function App() {
     const {refOverlay,refOverlayOpacity,layers,showGrid,gridSize,gridOpacity,photoLayerIdx}=S.current
     const dl=layers.filter(l=>!l.isPaper), paper=layers.find(l=>l.isPaper)
     if(paper?.visible){const lc=layerCanvases.current[paper.id];if(lc){ctx.globalAlpha=paper.opacity/100;ctx.drawImage(lc,0,0);ctx.globalAlpha=1}}
+    const _drawRef=()=>{
+      ctx.globalAlpha=refOverlayOpacity/100
+      if(photoBakedRef.current&&bakedImageRef.current){ctx.drawImage(bakedImageRef.current,0,0)}
+      else if(refImageEl.current){const img=refImageEl.current,pAR=img.naturalWidth/img.naturalHeight,cAR=CW/CH;let dw=CW,dh=CH,dx=0,dy=0;if(pAR>cAR){dh=CW/pAR;dy=(CH-dh)/2}else{dw=CH*pAR;dx=CW-dw};ctx.drawImage(img,dx,dy,dw,dh)}
+      ctx.globalAlpha=1
+    }
     dl.forEach((l,i)=>{
-      if(refOverlay&&i===photoLayerIdx){const _rs=photoBakedRef.current?bakedImageRef.current:refImageEl.current;if(_rs){ctx.globalAlpha=refOverlayOpacity/100;ctx.drawImage(_rs,0,0,CW,CH);ctx.globalAlpha=1}}
+      if(refOverlay&&i===photoLayerIdx)_drawRef()
       if(!l.visible)return;const lc=layerCanvases.current[l.id];if(!lc)return
       ctx.globalAlpha=l.opacity/100;ctx.drawImage(lc,0,0);ctx.globalAlpha=1
     })
-    if(refOverlay&&photoLayerIdx>=dl.length){const _rs=photoBakedRef.current?bakedImageRef.current:refImageEl.current;if(_rs){ctx.globalAlpha=refOverlayOpacity/100;ctx.drawImage(_rs,0,0,CW,CH);ctx.globalAlpha=1}}
+    if(refOverlay&&photoLayerIdx>=dl.length)_drawRef()
     if(showGrid){
       ctx.globalAlpha=gridOpacity/100;ctx.strokeStyle='#3366ff';ctx.setLineDash([])
       if(gridSize<0){
@@ -878,7 +882,14 @@ export default function App() {
         ctx.globalAlpha=1
       }
       if(practiceMode&&practiceObject){
-        drawCompound(ctx,practiceObject,CW/2,CH*.50,Math.min(CW,CH)*.45,practiceStyle)
+        const _sc=Math.min(CW,CH)*.45
+        const _groundOff={mushroom:.48,rocket:.50,snowman:.48,lamp:.48,crystal:.54,hourglass:.46,cube:.28,sphere:.38,torus:.147,octahedron:.44,cone:.42}
+        const _gY=CH*.75
+        const _off=_groundOff[practiceObject.type]??0.46
+        const _cy=_gY-_sc*_off
+        ctx.beginPath();ctx.moveTo(CW*.08,_gY);ctx.lineTo(CW*.92,_gY)
+        ctx.strokeStyle='rgba(100,96,90,0.35)';ctx.lineWidth=1.5;ctx.setLineDash([]);ctx.stroke()
+        drawCompound(ctx,practiceObject,CW/2,_cy,_sc,practiceStyle)
       }
     }
     if(!S.current.practiceMode){
@@ -913,6 +924,8 @@ export default function App() {
       ctx.drawImage(content,(or||rect).x,(or||rect).y,(or||rect).w,(or||rect).h,-rect.w/2,-rect.h/2,rect.w,rect.h)
       ctx.restore()
     } else if(S.current.selPanel==='left'&&sel){drawSelPath(ctx,sel)}
+    // ライブプレビュー用オーバーレイをクリア（コミット後に残らないように）
+    const ov=photoOverlayRef.current;if(ov)ov.getContext('2d').clearRect(0,0,CW,CH)
   },[])
 
   useEffect(()=>{rCompRef.current=rightComposite;lCompRef.current=leftComposite},[rightComposite,leftComposite])
@@ -922,6 +935,7 @@ export default function App() {
   useEffect(()=>{rCompRef.current?.()},[refOpacity,refOverlay,refOverlayOpacity])
   useEffect(()=>{lCompRef.current?.()},[refOpacity])
   useEffect(()=>{lCompRef.current?.()},[practiceStyle,practiceMode,practiceObject])
+  useEffect(()=>{rCompRef.current?.()},[layers])
 
   useEffect(()=>{
     const el=drawAreaRef.current;if(!el)return
@@ -985,7 +999,7 @@ export default function App() {
     const dist=4.2/Math.max(.2,zoom)
     const camera=new THREE.PerspectiveCamera(38,CW/CH,.1,100)
     camera.position.set(dist*Math.sin(ry)*Math.cos(rx),dist*Math.sin(rx),dist*Math.cos(ry)*Math.cos(rx))
-    camera.lookAt(0,0,0)
+    camera.lookAt(0,-0.6,0)
     // Scene
     const scene=new THREE.Scene()
     const isWire=practiceStyle==='wireframe'
@@ -1011,6 +1025,9 @@ export default function App() {
     if(obj3d){
       obj3d.rotation.z=rz
       if(!isWire)obj3d.traverse(o=>{if(o.isMesh)o.castShadow=true})
+      obj3d.updateMatrixWorld(true)
+      const box=new THREE.Box3().setFromObject(obj3d)
+      obj3d.position.y=-1.38-box.min.y
       scene.add(obj3d)
     }
     renderer.render(scene,camera)
@@ -1059,7 +1076,7 @@ export default function App() {
 
   const getPR=panel=>({
     disp:panel==='left'
-      ?(S.current.practiceMode&&S.current.practiceDrawMode?practiceOverlayRef.current:photoDispRef.current)
+      ?(S.current.practiceMode&&S.current.practiceDrawMode?practiceOverlayRef.current:(photoOverlayRef.current??photoDispRef.current))
       :displayRef.current,
     draw:panel==='left'
       ?(S.current.practiceMode?practiceOverlayRef.current:photoCanvas.current)
@@ -1126,7 +1143,9 @@ export default function App() {
       isDrawing.current=true;lastPt.current=pt
       if(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER){
         const ctx=draw?.getContext('2d');if(!ctx)return
-        if(S.current.practiceMode&&S.current.practiceDrawMode){saveHist('left');saveHist('right')}else saveHist(panel)
+        if(S.current.practiceMode&&S.current.practiceDrawMode){saveHist('left');saveHist('right')}
+        else if(refImageEl.current&&!S.current.practiceMode){saveHist('left');saveHist('right')}
+        else saveHist(panel)
         penStrokeStart.current=pt
         lastPt.current=pt
         lastClientXY.current={x:e.clientX,y:e.clientY}
@@ -1134,7 +1153,7 @@ export default function App() {
         const sz=Math.max(1,activeSize*pr)
         ctx.globalCompositeOperation=activeTool===TOOLS.ERASER?'destination-out':'source-over'
         ctx.fillStyle=activeTool===TOOLS.ERASER?'rgba(0,0,0,1)':penColor
-        ctx.beginPath();ctx.arc(spt.x,spt.y,sz/2,0,Math.PI*2);ctx.fill()
+        ctx.beginPath();ctx.arc(pt.x,pt.y,sz/2,0,Math.PI*2);ctx.fill()
         comp();tick()
       } else if(activeTool===TOOLS.LINE){
         const {showGrid:sg,gridSize:gs}=S.current
@@ -1210,7 +1229,28 @@ export default function App() {
             ?applySnap(pt,{hvFrom:penStrokeStart.current})
             :pt
           ctx.beginPath();ctx.moveTo(lastPt.current.x,lastPt.current.y);ctx.lineTo(spt.x,spt.y);ctx.stroke()
-          lastPt.current=spt;comp();tick()
+          lastPt.current=spt
+          if(lastClientXY.current&&refImageEl.current&&!S.current.practiceMode){
+            const ls=lastClientXY.current,cs={x:e.clientX,y:e.clientY}
+            const oppPanel=panel==='right'?'left':'right'
+            const oppDisp=panel==='right'?photoDispRef.current:displayRef.current
+            const oppDraw=getPR(oppPanel).draw
+            if(oppDisp&&oppDraw){
+              const r=oppDisp.getBoundingClientRect()
+              const seg=clipLineToBBox(ls.x,ls.y,cs.x,cs.y,r.left,r.top,r.right,r.bottom)
+              if(seg){
+                const p1=screenToCv(seg[0],seg[1],r),p2=screenToCv(seg[2],seg[3],r)
+                const dctx=oppDraw.getContext('2d')
+                dctx.globalCompositeOperation=activeTool===TOOLS.ERASER?'destination-out':'source-over'
+                dctx.strokeStyle=activeTool===TOOLS.ERASER?'rgba(0,0,0,1)':penColor
+                dctx.lineWidth=sz;dctx.lineCap='round';dctx.lineJoin='round'
+                dctx.beginPath();dctx.moveTo(p1.x,p1.y);dctx.lineTo(p2.x,p2.y);dctx.stroke()
+                if(panel==='right')lCompRef.current?.();else rCompRef.current?.()
+              }
+            }
+            lastClientXY.current=cs
+          }
+          comp();tick()
         }
       } else if(activeTool===TOOLS.LINE&&lineStart.current&&lineStartScreen.current){
         let ex=e.clientX,ey=e.clientY
@@ -1272,7 +1312,9 @@ export default function App() {
         saveHist('left');saveHist('right');return
       }
       if(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER){
-        if(S.current.practiceMode&&S.current.practiceDrawMode){saveHist('left');saveHist('right')}else saveHist(panel)
+        if(S.current.practiceMode&&S.current.practiceDrawMode){saveHist('left');saveHist('right')}
+        else if(refImageEl.current&&!S.current.practiceMode){saveHist('left');saveHist('right')}
+        else saveHist(panel)
       } else if(activeTool===TOOLS.MOVE){
         saveHist(panel)
       }
@@ -1280,7 +1322,11 @@ export default function App() {
       const ctx2=draw?.getContext('2d');if(ctx2)ctx2.globalCompositeOperation='source-over'
       moveSnap.current=null;lastPt.current=null
     }
-    return{onPointerDown,onPointerMove,onPointerUp,onPointerLeave:onPointerUp}
+    const onPointerEnter=e=>{
+      if(!e.buttons||isDrawing.current)return
+      onPointerDown(e)
+    }
+    return{onPointerDown,onPointerMove,onPointerUp,onPointerLeave:onPointerUp,onPointerEnter}
   }
 
   const leftH=makeHandlers('left'), rightH=makeHandlers('right')
@@ -1335,6 +1381,26 @@ export default function App() {
     document.addEventListener('pointermove',onMove)
     document.addEventListener('pointerup',onUp)
   },[])
+
+  // ── Crop handle drag ─────────────────────────────────────────
+  const onCropHandleDown = useCallback((handle,initRect,e)=>{
+    e.preventDefault();e.stopPropagation()
+    const startX=e.clientX,startY=e.clientY
+    const scale=viewZoom/100
+    const fw=fitDims?.w??0,fh=fitDims?.h??0
+    const MIN=20
+    const onMove=ev=>{
+      const dx=(ev.clientX-startX)/scale,dy=(ev.clientY-startY)/scale
+      let {x1,y1,x2,y2}=initRect
+      if(handle==='tl'||handle==='l'||handle==='bl')x1=Math.min(initRect.x2-MIN,Math.max(0,initRect.x1+dx))
+      if(handle==='tr'||handle==='r'||handle==='br')x2=Math.max(initRect.x1+MIN,Math.min(fw,initRect.x2+dx))
+      if(handle==='tl'||handle==='t'||handle==='tr')y1=Math.min(initRect.y2-MIN,Math.max(0,initRect.y1+dy))
+      if(handle==='bl'||handle==='b'||handle==='br')y2=Math.max(initRect.y1+MIN,Math.min(fh,initRect.y2+dy))
+      setCropRect({x1:Math.round(x1),y1:Math.round(y1),x2:Math.round(x2),y2:Math.round(y2)})
+    }
+    const onUp=()=>{document.removeEventListener('pointermove',onMove);document.removeEventListener('pointerup',onUp)}
+    document.addEventListener('pointermove',onMove);document.addEventListener('pointerup',onUp)
+  },[viewZoom,fitDims])
 
   // ── Selection helpers ─────────────────────────────────────────
   const applySelClip=(ctx,sel)=>{ctx.beginPath();if(sel.pts){sel.pts.forEach((p,i)=>i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y));ctx.closePath()}else{ctx.rect(sel.x,sel.y,sel.w,sel.h)};ctx.clip()}
@@ -1555,10 +1621,20 @@ export default function App() {
 
   const deletePhoto=()=>{
     setRefImage(null);setRefOverlay(false)
+    setCropMode(false);setCropRect(null);setAppliedCrop(null)
     photoBakedRef.current=false
     const ctx=photoCanvas.current?.getContext('2d');if(ctx)ctx.clearRect(0,0,CW,CH)
     if(S.current.activeLayerId==='photo')setActiveLayerId(drawingLayers[drawingLayers.length-1]?.id??1)
-    lCompRef.current?.()
+    // 描画パネルの全レイヤーをリセット
+    layers.forEach(l=>{
+      const c=layerCanvases.current[l.id];if(!c)return
+      const lctx=c.getContext('2d');lctx.clearRect(0,0,CW,CH)
+      if(l.isPaper){lctx.fillStyle='#ffffff';lctx.fillRect(0,0,CW,CH)}
+      const blank=lctx.getImageData(0,0,CW,CH)
+      histStacks.current[String(l.id)]=[blank];histPtrs.current[String(l.id)]=0
+    })
+    photoOverlayRef.current?.getContext('2d')?.clearRect(0,0,CW,CH)
+    lCompRef.current?.();rCompRef.current?.()
   }
 
   // ── Layer ops ─────────────────────────────────────────────────
@@ -1842,14 +1918,6 @@ export default function App() {
       <header className="toolbar">
         <button className="menu-btn" onClick={()=>setShowMenu(v=>!v)} title="メニュー"><MenuIcon/></button>
         <div className="tb-spacer"/>
-        {refImage&&!practiceMode&&(
-          <div className="panel-switch-group">
-            <button className={`panel-sw-btn${activeLayerId==='photo'?' psw-active':''}`}
-              onClick={()=>setActiveLayerId('photo')} title="写真レイヤーを編集">写真</button>
-            <button className={`panel-sw-btn${activeLayerId!=='photo'?' psw-active':''}`}
-              onClick={()=>setActiveLayerId(drawingLayers[drawingLayers.length-1]?.id??1)} title="描画レイヤーを編集">描画</button>
-          </div>
-        )}
         <div className="toolbar-right">
           <div className="toolbar-tools">
             {TOOL_IDS.map(id=>{
@@ -1907,14 +1975,51 @@ export default function App() {
                 </div>
               ):(
                 refImage&&!practiceMode&&fitDims?(
+                  <>
                   <div style={{position:'absolute',right:0,top:'50%',transform:'translateY(-50%)',
-                               width:fitDims.w,height:fitDims.h,overflow:'hidden',flexShrink:0,
-                               boxShadow:'0 0 30px rgba(0,0,0,.4)'}}>
+                               width:appliedCrop?appliedCrop.x2-appliedCrop.x1:fitDims.w,
+                               height:appliedCrop?appliedCrop.y2-appliedCrop.y1:fitDims.h,
+                               overflow:'hidden',flexShrink:0,boxShadow:'0 0 30px rgba(0,0,0,.4)'}}>
                     <canvas ref={photoDispRef} width={CW} height={CH}
-                      style={{position:'absolute',left:-(fitDims.cw-fitDims.w),top:-(fitDims.ch-fitDims.h)/2,
+                      style={{position:'absolute',
+                              left:-(fitDims.cw-fitDims.w)-(appliedCrop?.x1??0),
+                              top:-(fitDims.ch-fitDims.h)/2-(appliedCrop?.y1??0),
+                              width:fitDims.cw,height:fitDims.ch,display:'block'}}/>
+                    <canvas ref={photoOverlayRef} width={CW} height={CH}
+                      style={{position:'absolute',
+                              left:-(fitDims.cw-fitDims.w)-(appliedCrop?.x1??0),
+                              top:-(fitDims.ch-fitDims.h)/2-(appliedCrop?.y1??0),
                               width:fitDims.cw,height:fitDims.ch,display:'block',cursor,touchAction:'none'}}
                       {...leftH}/>
                   </div>
+                  {cropMode&&cropRect&&(
+                    <div style={{position:'absolute',right:0,top:'50%',transform:'translateY(-50%)',
+                                 width:fitDims.w,height:fitDims.h,pointerEvents:'none',zIndex:10}}>
+                      <svg width={fitDims.w} height={fitDims.h} style={{position:'absolute',inset:0,overflow:'visible'}}>
+                        <rect x={0} y={0} width={fitDims.w} height={cropRect.y1} fill="rgba(0,0,0,.5)"/>
+                        <rect x={0} y={cropRect.y2} width={fitDims.w} height={fitDims.h-cropRect.y2} fill="rgba(0,0,0,.5)"/>
+                        <rect x={0} y={cropRect.y1} width={cropRect.x1} height={cropRect.y2-cropRect.y1} fill="rgba(0,0,0,.5)"/>
+                        <rect x={cropRect.x2} y={cropRect.y1} width={fitDims.w-cropRect.x2} height={cropRect.y2-cropRect.y1} fill="rgba(0,0,0,.5)"/>
+                        <rect x={cropRect.x1} y={cropRect.y1} width={cropRect.x2-cropRect.x1} height={cropRect.y2-cropRect.y1}
+                          fill="none" stroke="#4a9eff" strokeWidth={2}/>
+                        {[['tl',cropRect.x1,cropRect.y1,'nwse-resize'],
+                          ['tr',cropRect.x2,cropRect.y1,'nesw-resize'],
+                          ['bl',cropRect.x1,cropRect.y2,'nesw-resize'],
+                          ['br',cropRect.x2,cropRect.y2,'nwse-resize'],
+                          ['t',(cropRect.x1+cropRect.x2)/2,cropRect.y1,'ns-resize'],
+                          ['b',(cropRect.x1+cropRect.x2)/2,cropRect.y2,'ns-resize'],
+                          ['l',cropRect.x1,(cropRect.y1+cropRect.y2)/2,'ew-resize'],
+                          ['r',cropRect.x2,(cropRect.y1+cropRect.y2)/2,'ew-resize'],
+                        ].map(([h,hx,hy,cur])=>(
+                          <rect key={h} x={hx-7} y={hy-7} width={14} height={14}
+                            fill="#4a9eff" stroke="white" strokeWidth={1.5} rx={2}
+                            style={{cursor:cur,pointerEvents:'auto',touchAction:'none'}}
+                            onPointerDown={e=>onCropHandleDown(h,{...cropRect},e)}/>
+                        ))}
+                      </svg>
+                    </div>
+                  )}
+                  </>
                 ):(
                   <canvas ref={photoDispRef} width={CW} height={CH} className="main-canvas"
                     style={{cursor,display:refImage?'block':'none',
@@ -1970,8 +2075,16 @@ export default function App() {
               style={leftHanded?{left:0,width:`${100-splitRatio}%`}:{left:`${splitRatio}%`,width:`${100-splitRatio}%`}}>
               <div className={`canvas-area${refImage&&!practiceMode?' canvas-dual':''}`} ref={canvasAreaRef}>
                 {refImage&&!practiceMode&&fitDims?(
-                  <div style={{width:fitDims.w,height:fitDims.h,position:'relative',flexShrink:0,overflow:'hidden',marginTop:fitDims.top??0,boxShadow:'0 0 30px rgba(0,0,0,.4)'}}>
-                    <div style={{position:'absolute',top:-(fitDims.ch-fitDims.h)/2,left:-(fitDims.cw-fitDims.w),width:fitDims.cw,height:fitDims.ch}}>
+                  <div style={{
+                    width:appliedCrop?appliedCrop.x2-appliedCrop.x1:fitDims.w,
+                    height:appliedCrop?appliedCrop.y2-appliedCrop.y1:fitDims.h,
+                    position:'relative',flexShrink:0,overflow:'hidden',
+                    marginTop:(fitDims.top??0)+(appliedCrop?.y1??0),
+                    boxShadow:'0 0 30px rgba(0,0,0,.4)'}}>
+                    <div style={{position:'absolute',
+                      top:-(fitDims.ch-fitDims.h)/2-(appliedCrop?.y1??0),
+                      left:-(fitDims.cw-fitDims.w)-(appliedCrop?.x1??0),
+                      width:fitDims.cw,height:fitDims.ch}}>
                       <canvas ref={displayRef} width={CW} height={CH}
                         style={{width:'100%',height:'100%',display:'block',cursor,touchAction:'none'}}
                         {...rightH}/>
@@ -2007,6 +2120,16 @@ export default function App() {
               <input type="range" min="0" max="100" value={refOverlayOpacity} onChange={e=>setRefOverlayOpacity(+e.target.value)} className="split-slider"/>
               <span className="bb-val">{refOverlayOpacity}%</span>
             </>}
+            {refImage&&!practiceMode&&(appliedCrop?(
+              <button className="bb-crop-btn bb-crop-reset" onClick={()=>setAppliedCrop(null)} title="切り取りを解除">切り取り解除</button>
+            ):cropMode?(
+              <>
+                <button className="bb-crop-btn bb-crop-apply" onClick={()=>{setAppliedCrop({...cropRect});setCropMode(false)}} title="切り取りを適用">適用</button>
+                <button className="bb-crop-btn bb-crop-cancel" onClick={()=>{setCropMode(false);setCropRect(null)}} title="キャンセル">キャンセル</button>
+              </>
+            ):(
+              <button className="bb-crop-btn" onClick={()=>{if(fitDims){setCropRect({x1:0,y1:0,x2:fitDims.w,y2:fitDims.h});setCropMode(true)}}} title="切り取り">切り取り</button>
+            ))}
             {refImage&&!practiceMode&&<button onClick={deletePhoto} className="bb-del-btn" title="写真を削除">✕ 削除</button>}
           </div>
         </div>
