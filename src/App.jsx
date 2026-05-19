@@ -4,8 +4,9 @@ import './App.css'
 
 const TOOLS = { PEN:'pen', ERASER:'eraser', SELECT:'select', MOVE:'move', LINE:'line', RULER:'ruler', HAND:'hand' }
 const PRESET_COLORS = ['#000000','#00cc00','#ff6600','#0066ff','#ff00ee','#ff0000']
-const CW = 1400, CH = 1050
+const DEFAULT_W = 2800, DEFAULT_H = 1050
 const PAPER_ID = 0
+const PHOTO_ID = 'photo'
 const MAX_HIST = 30
 let layerCounter = 2
 const mkLayer = (id,name) => ({ id, name, opacity:100, visible:true })
@@ -39,6 +40,10 @@ const SHORTCUT_ACTIONS=[
 const COMPOUNDS=['sphere','cube','cylinder','cone','torus','octahedron','tetrahedron','icosahedron','dodecahedron','prism','pyramid','capsule','torusknot','gem','arrow','mushroom','rocket','snowman','lamp','crystal','hourglass']
 const PSTYLES=['shading','wireframe']
 const PLABELS={shading:'陰影あり',wireframe:'線画'}
+const FLAT_SHAPES=['circle','ellipse','triangle','rtriangle','square','rect','pentagon','hexagon','star','diamond','trapezoid','parallelogram']
+const FLAT_LABELS={circle:'円',ellipse:'楕円',triangle:'正三角形',rtriangle:'直角三角形',square:'正方形',rect:'長方形',pentagon:'正五角形',hexagon:'正六角形',star:'星形',diamond:'菱形',trapezoid:'台形',parallelogram:'平行四辺形'}
+const FLAT_STYLES=['filled','outline']
+const FLAT_STYLE_LABELS={filled:'塗り',outline:'輪郭'}
 const TOOL_IDS=['pen','eraser','select','move','line','ruler','grid','hand']
 
 // ep = ellipse perspective 0.2(front) → 0.55(top-down), rot/skX/skY = view angle
@@ -50,6 +55,9 @@ function genCompound(){
     skY:(Math.random()-.5)*.08,
     ep:.22+Math.random()*.33
   }
+}
+function genFlat(){
+  return{type:FLAT_SHAPES[Math.floor(Math.random()*FLAT_SHAPES.length)],rot:(Math.random()-.5)*.35,aspect:.5+Math.random()*.8}
 }
 
 function drawCompound(ctx,obj,cx,cy,sc,style){
@@ -447,7 +455,7 @@ function clipLineToBBox(x1,y1,x2,y2,minX,minY,maxX,maxY){
   if(!clip(-dx,x1-minX)||!clip(dx,maxX-x1)||!clip(-dy,y1-minY)||!clip(dy,maxY-y1))return null
   return[x1+t0*dx,y1+t0*dy,x1+t1*dx,y1+t1*dy]
 }
-function screenToCv(sx,sy,rect){return{x:(sx-rect.left)*(CW/rect.width),y:(sy-rect.top)*(CH/rect.height)}}
+function screenToCv(sx,sy,rect,cw,ch){return{x:(sx-rect.left)*(cw/rect.width),y:(sy-rect.top)*(ch/rect.height)}}
 
 // ── LayerThumb ────────────────────────────────────────────────────
 function LayerThumb({layerId,layerCanvases,rev}) {
@@ -458,6 +466,31 @@ function LayerThumb({layerId,layerCanvases,rev}) {
     const ctx=t.getContext('2d');ctx.clearRect(0,0,t.width,t.height);ctx.drawImage(s,0,0,t.width,t.height)
   },[layerId,layerCanvases,rev])
   return <canvas ref={ref} width={44} height={32} className="layer-thumb-canvas"/>
+}
+
+// ── ToggleColorPicker — 再タップで閉じる色選択ボタン ─────────────
+function ToggleColorPicker({value,onChange,width=36,height=24}){
+  const inputRef=useRef(null)
+  const openRef=useRef(false)
+  const handleClick=e=>{
+    e.preventDefault()
+    if(openRef.current){openRef.current=false;inputRef.current?.blur();return}
+    openRef.current=true
+    try{inputRef.current?.showPicker()}catch{inputRef.current?.click()}
+  }
+  return(
+    <span style={{position:'relative',display:'inline-block',width,height,flexShrink:0}}>
+      <button style={{width:'100%',height:'100%',background:value,
+        border:'1px solid #555',borderRadius:3,cursor:'pointer',display:'block',padding:0}}
+        onClick={handleClick}/>
+      <input ref={inputRef} type="color" value={value}
+        onChange={e=>onChange(e.target.value)}
+        onFocus={()=>{openRef.current=true}}
+        onBlur={()=>{openRef.current=false}}
+        style={{position:'absolute',left:0,top:0,width:0,height:0,opacity:0,
+          pointerEvents:'none',border:'none',padding:0}}/>
+    </span>
+  )
 }
 
 // ── RulerOverlay ──────────────────────────────────────────────────
@@ -476,7 +509,7 @@ function RulerOverlay({w,h,rulers=[],activeRulerId=null}){
       // parse color to rgba
       const alpha=isActive?0.95:0.75
       const alphaL=isActive?0.75:0.55
-      const lw=isActive?2:1.5
+      const lw=1.5
       // helper: hex/named color -> rgba string
       const toRgba=(col,a)=>{
         const tmp=document.createElement('canvas');tmp.width=1;tmp.height=1
@@ -490,15 +523,15 @@ function RulerOverlay({w,h,rulers=[],activeRulerId=null}){
       ctx.strokeStyle=C;ctx.lineWidth=lw;ctx.setLineDash([])
       ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke()
       // endpoint handles
-      const hR=isActive?6:4
+      const hR=3
       ;[[x1,y1],[x2,y2]].forEach(([px,py])=>{
         ctx.beginPath();ctx.arc(px,py,hR,0,Math.PI*2)
         ctx.fillStyle='#fff';ctx.fill()
-        ctx.strokeStyle=C;ctx.lineWidth=isActive?2:1.5;ctx.stroke()
+        ctx.strokeStyle=C;ctx.lineWidth=1.5;ctx.stroke()
       })
       // tick marks
-      const TICK=isActive?13:10
-      ctx.lineWidth=isActive?1.4:1.1
+      const TICK=10
+      ctx.lineWidth=1.1
       const tick=(d,h2,label)=>{
         const px=x1+ux*d,py=y1+uy*d
         ctx.beginPath()
@@ -507,7 +540,7 @@ function RulerOverlay({w,h,rulers=[],activeRulerId=null}){
         ctx.strokeStyle=CL;ctx.stroke()
         if(label!=null){
           ctx.fillStyle=C
-          ctx.font=`bold ${isActive?10:9}px sans-serif`
+          ctx.font=`9px sans-serif`
           ctx.fillText(label,px+nx*(TICK+5)-ctx.measureText(label).width/2,py+ny*(TICK+5)+4)
         }
       }
@@ -523,7 +556,7 @@ function RulerOverlay({w,h,rulers=[],activeRulerId=null}){
         }
         const totalCm=(len/ppc).toFixed(1)
         const mx=(x1+x2)/2,my=(y1+y2)/2
-        ctx.font=`bold ${isActive?11:10}px sans-serif`;ctx.fillStyle=C
+        ctx.font=`10px sans-serif`;ctx.fillStyle=C
         ctx.fillText(`${totalCm}cm`,mx+nx*22-ctx.measureText(`${totalCm}cm`).width/2,my+ny*22+4)
       } else if(type==='div'){
         const n=divisions
@@ -532,7 +565,7 @@ function RulerOverlay({w,h,rulers=[],activeRulerId=null}){
           const isEnd=i===0||i===n
           tick(d,isEnd?TICK*1.1:TICK*.85,(!isEnd&&i>0)?`${i}`:null)
         }
-        ctx.font=`bold ${isActive?10:9}px sans-serif`;ctx.fillStyle=C
+        ctx.font=`9px sans-serif`;ctx.fillStyle=C
         ctx.fillText('0',x1+nx*(TICK+5)-4,y1+ny*(TICK+5)+4)
         ctx.fillText(`${n}`,x2+nx*(TICK+5)-4,y2+ny*(TICK+5)+4)
       }
@@ -544,11 +577,11 @@ function RulerOverlay({w,h,rulers=[],activeRulerId=null}){
 }
 
 // ── SelectionStrip ─────────────────────────────────────────────────
-function SelectionStrip({sel,canvasEl,onDeselect,onDelete,onDeleteOut,onFill,onTransform}) {
+function SelectionStrip({sel,canvasEl,cvW,cvH,onDeselect,onDelete,onDeleteOut,onFill,onTransform}) {
   if(!sel||!canvasEl||sel.w<2||sel.h<2)return null
   const r=canvasEl.getBoundingClientRect()
-  const left=Math.max(4,r.left+sel.x*(r.width/CW)-38)
-  const top=r.top+sel.y*(r.height/CH)
+  const left=Math.max(4,r.left+sel.x*(r.width/cvW)-38)
+  const top=r.top+sel.y*(r.height/cvH)
   const items=[
     {icon:<DeselectIcon/>,label:'選択を解除',fn:onDeselect},
     {icon:<DeleteSelIcon/>,label:'消去',fn:onDelete},
@@ -568,10 +601,10 @@ function SelectionStrip({sel,canvasEl,onDeselect,onDelete,onDeleteOut,onFill,onT
 }
 
 // ── TransformOverlay ──────────────────────────────────────────────
-function TransformOverlay({xf,canvasEl,onUpdate,onCommit,onCancel}) {
+function TransformOverlay({xf,canvasEl,cvW,cvH,onUpdate,onCommit,onCancel}) {
   if(!xf||!canvasEl)return null
   const r=canvasEl.getBoundingClientRect()
-  const sx=r.width/CW,sy=r.height/CH
+  const sx=r.width/cvW,sy=r.height/cvH
   const {rect,angle}=xf, cx=rect.x+rect.w/2, cy=rect.y+rect.h/2
   const handles=[['tl',rect.x,rect.y],['tc',cx,rect.y],['tr',rect.x+rect.w,rect.y],['ml',rect.x,cy],['mr',rect.x+rect.w,cy],['bl',rect.x,rect.y+rect.h],['bc',cx,rect.y+rect.h],['br',rect.x+rect.w,rect.y+rect.h],['rot',cx,rect.y-36/sy]]
   const onHDown=(e,hid)=>{
@@ -604,14 +637,11 @@ function TransformOverlay({xf,canvasEl,onUpdate,onCommit,onCancel}) {
 export default function App() {
   const [activeTool,setActiveTool]     = useState(TOOLS.PEN)
   const [penColor,setPenColor]         = useState('#000000')
-  const [penSize,setPenSize]           = useState(5)
+  const [penSize,setPenSize]           = useState(1)
   const [eraserSize,setEraserSize]     = useState(20)
-  const [splitRatio,setSplitRatio]     = useState(50)  // percent 15-85
   const [panOffset,setPanOffset]       = useState({x:0,y:0})
   const [refImage,setRefImage]         = useState(null)
   const [refOpacity,setRefOpacity]     = useState(100)
-  const [refOverlay,setRefOverlay]     = useState(false)
-  const [refOverlayOpacity,setRefOverlayOpacity] = useState(50)
   const [layers,setLayers]             = useState([mkPaper(),mkLayer(1,'レイヤー 1')])
   const [activeLayerId,setActiveLayerId] = useState(1)
   const [showLayerPanel,setShowLayerPanel] = useState(true)
@@ -620,31 +650,41 @@ export default function App() {
   const [gridSize,setGridSize]         = useState(100)
   const [gridOpacity,setGridOpacity]   = useState(40)
   const [showRuler,setShowRuler]       = useState(false)
-  const [rulerType,setRulerType]       = useState('div')   // default for next ruler
-  const [rulerDivisions,setRulerDivisions] = useState(8)  // default for next ruler
-  const [rulers,setRulers]             = useState([])      // [{id,x1,y1,x2,y2,type,divisions,color}]
+  const [rulerType,setRulerType]       = useState('div')
+  const [rulerDivisions,setRulerDivisions] = useState(8)
+  const [rulerColor,setRulerColor]     = useState('#2864ff')
+  const [rulers,setRulers]             = useState([])
   const [activeRulerId,setActiveRulerId] = useState(null)
   const [urlInput,setUrlInput]         = useState('')
   const [urlError,setUrlError]         = useState('')
-  const [selPanel,setSelPanel]         = useState(null)
   const [xf,setXf]                     = useState(null)
   const [showMenu,setShowMenu]         = useState(false)
   const [leftHanded,setLeftHanded]     = useState(false)
   const [hardMode,_setHardMode]        = useState(false)
-  const [photoLayerIdx,setPhotoLayerIdx] = useState(0)
   const [practiceMode,setPracticeMode] = useState(false)
   const [practiceStyle,setPracticeStyle] = useState('shading')
   const [practiceObject,setPracticeObject] = useState(null)
   const [practiceOrbit,setPracticeOrbit] = useState({rx:.3,ry:.2,rz:0,zoom:1})
-  const [refImageSize,setRefImageSize]   = useState(null)    // {w,h}|null
-  const [cropMode,setCropMode]           = useState(false)
-  const [cropRect,setCropRect]           = useState(null)    // {x1,y1,x2,y2} px in fitDims space
-  const [appliedCrop,setAppliedCrop]     = useState(null)
+  const [practiceDrawMode,setPracticeDrawMode] = useState(true)
+  const [practiceCategory,setPracticeCategory] = useState('3d')  // '3d' | 'flat'
+  const [flatStyle,setFlatStyle]               = useState('filled')
+  const [refOverlay,setRefOverlay]             = useState(false)
+  const [refOverlayOpacity,setRefOverlayOpacity] = useState(50)
+  const [practiceOverlay,setPracticeOverlay]   = useState(false)
+  const [practiceOverlayOpacity,setPracticeOverlayOpacity] = useState(40)
   const [showShortcutPanel,setShowShortcutPanel] = useState(false)
   const [scLearning,setScLearning]       = useState(null)
   const [shortcuts,setShortcuts]         = useState(()=>{
     try{return{...DEFAULT_SHORTCUTS,...JSON.parse(localStorage.getItem('key-shortcuts')||'{}')} }catch{return{...DEFAULT_SHORTCUTS}}
   })
+  const [cvW,setCvW] = useState(DEFAULT_W)
+  const [cvH,setCvH] = useState(DEFAULT_H)
+  const [dispSize,setDispSize] = useState({w:0,h:0})
+  const [viewZoom,setViewZoom] = useState(100)
+  const [cropMode,setCropMode] = useState(false)
+  const [cropRect,setCropRect] = useState(null)
+  const [appliedCrop,setAppliedCrop] = useState(null)
+  const [photoAreaDragOver,setPhotoAreaDragOver] = useState(false)
 
   const setHardMode = v => { if(v&&activeTool!==TOOLS.PEN)setActiveTool(TOOLS.PEN); _setHardMode(v) }
 
@@ -654,25 +694,23 @@ export default function App() {
   const xfRef      = useRef(null)
   const setXfState = v => { const val=typeof v==='function'?v(xfRef.current):v; xfRef.current=val; setXf(val) }
 
+  const cvRef          = useRef({w:DEFAULT_W,h:DEFAULT_H})
   const layerCanvases  = useRef({})
+  const photoLayerCanvas = useRef(null)
   const displayRef     = useRef(null)
-  const photoDispRef   = useRef(null)
-  const photoCanvas    = useRef(null)
-  const bakedImageRef  = useRef(null)
+  const compRef        = useRef(null)
   const panOffsetRef   = useRef({x:0,y:0})
   const panStartRef    = useRef(null)
   const lastClientXY   = useRef(null)
   const refImageEl     = useRef(null)
   const fileInputRef   = useRef(null)
-  const practiceObjRef  = useRef(null)
+  const practiceObjRef = useRef(null)
   const orbitDragStart    = useRef(null)
-  const placingRulerIdRef = useRef(null)
-  const canvasAreaRef     = useRef(null)
+  const placingRulerIdRef  = useRef(null)
+  const placingRulerStartRef = useRef(null)
   const drawAreaRef       = useRef(null)
-  const splitDragRef      = useRef(null)
-  const [splitDragging,setSplitDragging] = useState(false)
-  const [viewZoom,setViewZoom] = useState(100)
-  const [fitDims,setFitDims] = useState(null) // {w,h}|null for fit mode
+  const cursorDivRef      = useRef(null)
+  const [isCursorOnCanvas, setIsCursorOnCanvas] = useState(false)
 
   // layer drag-to-reorder
   const layerListRef   = useRef(null)
@@ -681,18 +719,13 @@ export default function App() {
   const [layerDragSrc, setLayerDragSrc] = useState(null)
   const [layerDropIdx, setLayerDropIdx] = useState(null)
 
-  const photoBakedRef = useRef(false)
-  const practiceOverlayRef = useRef(null)  // visible DOM canvas on top of 3D
-  const photoOverlayRef   = useRef(null)  // drawing overlay on photo panel
-  const [practiceDrawMode, setPracticeDrawMode] = useState(true)
-
   const [toolPositions,setToolPositions]=useState(()=>{try{return JSON.parse(localStorage.getItem('tool-positions')||'{}')}catch{return{}}})
   const [editToolLayout,setEditToolLayout]=useState(false)
 
   // ── Tabmate (WebHID) ──────────────────────────────────────────
   const [showTabmatePanel,setShowTabmatePanel] = useState(false)
   const [tabmateConnected,setTabmateConnected] = useState(false)
-  const [tabmateLearning,setTabmateLearning]   = useState(null) // action key being learned
+  const [tabmateLearning,setTabmateLearning]   = useState(null)
   const [tabmateMappings,setTabmateMappings]   = useState(()=>{
     try{return JSON.parse(localStorage.getItem('tabmate-mappings')||'{}')}catch{return {}}
   })
@@ -720,75 +753,92 @@ export default function App() {
   const selMoveOrigR = useRef(null)
   const moveOrigin   = useRef(null)
   const moveSnap     = useRef(null)
+  const shiftKeyRef     = useRef(false)
+  const penSnapDirRef   = useRef(null)
+  const penShiftSnapRef = useRef(null)
 
   const S = useRef({})
-  S.current = {activeTool,penColor,penSize,eraserSize,activeLayerId,refOpacity,refOverlay,refOverlayOpacity,layers,showGrid,gridSize,gridOpacity,selPanel,photoLayerIdx,practiceMode,practiceDrawMode,practiceStyle,practiceObject,rulerType,rulerDivisions,splitRatio,hardMode}
+  S.current = {activeTool,penColor,penSize,eraserSize,activeLayerId,refOpacity,layers,showGrid,gridSize,gridOpacity,practiceMode,practiceDrawMode,practiceStyle,practiceObject,rulerType,rulerDivisions,rulerColor,hardMode,practiceOrbit,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity}
   shortcutsRef.current = shortcuts
   scLearningRef.current = scLearning
 
-  const rCompRef = useRef(null)
-  const lCompRef = useRef(null)
   const doUndoRef = useRef(null)
   const doRedoRef = useRef(null)
-  const threeRef  = useRef(null)   // { renderer, rendered }
+  const threeRef  = useRef(null)
 
   // ── Canvas init ───────────────────────────────────────────────
   useEffect(()=>{
-    if(!photoCanvas.current){
-      const c=document.createElement('canvas');c.width=CW;c.height=CH;photoCanvas.current=c
-      const blank=c.getContext('2d').getImageData(0,0,CW,CH)
-      histStacks.current['photo']=[blank];histPtrs.current['photo']=0
-    }
-  },[])
-
-  // Reset overlay canvas history whenever practice mode is entered
-  useEffect(()=>{
-    if(!practiceMode)return
-    const resetOverlay=()=>{
-      const c=practiceOverlayRef.current;if(!c)return
-      c.getContext('2d').clearRect(0,0,CW,CH)
-      histStacks.current['practiceDraw']=[c.getContext('2d').getImageData(0,0,CW,CH)]
-      histPtrs.current['practiceDraw']=0;lastHistKey.current=null
-    }
-    // Delay one frame so the canvas element is mounted
-    const id=requestAnimationFrame(resetOverlay)
-    return()=>cancelAnimationFrame(id)
-  },[practiceMode])
-
-  useEffect(()=>{
+    const {w,h}=cvRef.current
     layers.forEach(l=>{
       if(!layerCanvases.current[l.id]){
-        const c=document.createElement('canvas');c.width=CW;c.height=CH
-        if(l.isPaper){const cx=c.getContext('2d');cx.fillStyle='#ffffff';cx.fillRect(0,0,CW,CH)}
+        const c=document.createElement('canvas');c.width=w;c.height=h
+        if(l.isPaper){const cx=c.getContext('2d');cx.fillStyle='#ffffff';cx.fillRect(0,0,w,h)}
         layerCanvases.current[l.id]=c
-        const key=String(l.id),blank=c.getContext('2d').getImageData(0,0,CW,CH)
+        const key=String(l.id),blank=c.getContext('2d').getImageData(0,0,w,h)
         histStacks.current[key]=[blank];histPtrs.current[key]=0
       }
     })
     Object.keys(layerCanvases.current).forEach(id=>{if(!layers.find(l=>l.id===+id))delete layerCanvases.current[id]})
   },[layers])
 
+  // Photo load → resize canvas to 2×photoDisplayWidth × photoDisplayHeight
   useEffect(()=>{
-    if(!refImage){refImageEl.current=null;setRefImageSize(null);return}
+    if(!refImage){refImageEl.current=null;return}
     const img=new Image();img.crossOrigin='anonymous';img.src=refImage
     img.onload=()=>{
-      refImageEl.current=img;setRefImageSize({w:img.naturalWidth,h:img.naturalHeight})
-      photoBakedRef.current=false
-      if(photoCanvas.current)photoCanvas.current.getContext('2d').clearRect(0,0,CW,CH)
-      if(bakedImageRef.current)bakedImageRef.current.getContext('2d').clearRect(0,0,CW,CH)
+      refImageEl.current=img
+      const el=drawAreaRef.current;if(!el)return
+      const aw=el.offsetWidth,ah=el.offsetHeight;if(!aw||!ah)return
+      const pAR=img.naturalWidth/img.naturalHeight
+      const halfW=aw/2
+      let photoW,photoH
+      if(pAR>halfW/ah){photoW=halfW;photoH=halfW/pAR}
+      else{photoH=ah;photoW=ah*pAR}
+      const nw=Math.round(photoW)*2,nh=Math.round(photoH)
+      setCvW(nw);setCvH(nh);cvRef.current={w:nw,h:nh}
+      Object.entries(layerCanvases.current).forEach(([id,c])=>{
+        c.width=nw;c.height=nh
+        const ctx=c.getContext('2d')
+        if(+id===PAPER_ID){ctx.fillStyle='#fff';ctx.fillRect(0,0,nw,nh)}
+        const blank=ctx.getImageData(0,0,nw,nh)
+        histStacks.current[String(id)]=[blank];histPtrs.current[String(id)]=0
+      })
+      // bake photo into photoLayerCanvas (left half)
+      if(!photoLayerCanvas.current)photoLayerCanvas.current=document.createElement('canvas')
+      const plc=photoLayerCanvas.current;plc.width=nw;plc.height=nh
+      const pctx=plc.getContext('2d');pctx.clearRect(0,0,nw,nh)
+      pctx.drawImage(img,0,0,nw/2,nh)
+      histStacks.current[PHOTO_ID]=[pctx.getImageData(0,0,nw,nh)];histPtrs.current[PHOTO_ID]=0
+      lastHistKey.current=null
+      setAppliedCrop(null);setCropMode(false);setCropRect(null)
       setRev(r=>r+1)
     }
   },[refImage])
 
+  // Compute CSS display size: fit cvW×cvH inside draw-area
+  useEffect(()=>{
+    const el=drawAreaRef.current;if(!el)return
+    const update=()=>{
+      const aw=el.offsetWidth,ah=el.offsetHeight;if(!aw||!ah)return
+      const {w:cw,h:ch}=cvRef.current
+      const ar=cw/ch
+      let dw=aw,dh=aw/ar
+      if(dh>ah){dh=ah;dw=ah*ar}
+      setDispSize({w:Math.round(dw),h:Math.round(dh)})
+    }
+    update()
+    const ro=new ResizeObserver(update);ro.observe(el)
+    return()=>ro.disconnect()
+  },[cvW,cvH])
+
   // ── History ───────────────────────────────────────────────────
-  const saveHist = useCallback((panel)=>{
-    const isPractice=panel==='left'&&S.current.practiceMode
-    const isPhoto=!isPractice&&(panel==='left'||S.current.activeLayerId==='photo')
-    const key=isPractice?'practiceDraw':isPhoto?'photo':String(S.current.activeLayerId)
-    const canvas=isPractice?practiceOverlayRef.current:isPhoto?photoCanvas.current:layerCanvases.current[S.current.activeLayerId]
-    if(!canvas)return
-    const data=canvas.getContext('2d').getImageData(0,0,CW,CH)
-    const stack=histStacks.current[key]??[];if(!histStacks.current[key]){histStacks.current[key]=stack;histPtrs.current[key]=-1}
+  const saveHist = useCallback(()=>{
+    const key=String(S.current.activeLayerId)
+    const canvas=S.current.activeLayerId===PHOTO_ID?photoLayerCanvas.current:layerCanvases.current[S.current.activeLayerId];if(!canvas)return
+    const {w:cw,h:ch}=cvRef.current
+    const data=canvas.getContext('2d').getImageData(0,0,cw,ch)
+    const stack=histStacks.current[key]??[]
+    if(!histStacks.current[key]){histStacks.current[key]=stack;histPtrs.current[key]=-1}
     const ptr=histPtrs.current[key]??-1
     stack.splice(ptr+1);stack.push(data)
     if(stack.length>MAX_HIST)stack.shift()
@@ -796,211 +846,176 @@ export default function App() {
     lastHistKey.current=key
   },[])
 
-  // ── Photo layer bake ──────────────────────────────────────────
-  const bakePhoto = useCallback(()=>{
-    if(!refImageEl.current)return
-    const img=refImageEl.current,pAR=img.naturalWidth/img.naturalHeight,cAR=CW/CH
-    let dw,dh,dx=0,dy=0
-    if(pAR>cAR){dw=CW;dh=CW/pAR;dy=(CH-dh)/2}else{dh=CH;dw=CH*pAR;dx=CW-dw}
-    if(!bakedImageRef.current){const c=document.createElement('canvas');c.width=CW;c.height=CH;bakedImageRef.current=c}
-    const bctx=bakedImageRef.current.getContext('2d');bctx.clearRect(0,0,CW,CH);bctx.drawImage(img,dx,dy,dw,dh)
-    photoBakedRef.current=true
-    saveHist('left')
-  },[saveHist])
-
-  useEffect(()=>{
-    if(activeLayerId==='photo'&&!photoBakedRef.current)bakePhoto()
-  },[activeLayerId,bakePhoto])
-
   // ── Composite ─────────────────────────────────────────────────
-  const rightComposite = useCallback(()=>{
+  const comp=useCallback(()=>{
     const disp=displayRef.current;if(!disp)return
-    const ctx=disp.getContext('2d');ctx.clearRect(0,0,CW,CH)
-    const {refOverlay,refOverlayOpacity,layers,showGrid,gridSize,gridOpacity,photoLayerIdx}=S.current
-    const dl=layers.filter(l=>!l.isPaper), paper=layers.find(l=>l.isPaper)
-    if(paper?.visible){const lc=layerCanvases.current[paper.id];if(lc){ctx.globalAlpha=paper.opacity/100;ctx.drawImage(lc,0,0);ctx.globalAlpha=1}}
-    const _drawRef=()=>{
-      ctx.globalAlpha=refOverlayOpacity/100
-      if(photoBakedRef.current&&bakedImageRef.current){ctx.drawImage(bakedImageRef.current,0,0)}
-      else if(refImageEl.current){const img=refImageEl.current,pAR=img.naturalWidth/img.naturalHeight,cAR=CW/CH;let dw=CW,dh=CH,dx=0,dy=0;if(pAR>cAR){dh=CW/pAR;dy=(CH-dh)/2}else{dw=CH*pAR;dx=CW-dw};ctx.drawImage(img,dx,dy,dw,dh)}
-      ctx.globalAlpha=1
-    }
-    dl.forEach((l,i)=>{
-      if(refOverlay&&i===photoLayerIdx)_drawRef()
-      if(!l.visible)return;const lc=layerCanvases.current[l.id];if(!lc)return
-      ctx.globalAlpha=l.opacity/100;ctx.drawImage(lc,0,0);ctx.globalAlpha=1
-    })
-    if(refOverlay&&photoLayerIdx>=dl.length)_drawRef()
-    if(showGrid){
-      ctx.globalAlpha=gridOpacity/100;ctx.strokeStyle='#3366ff';ctx.setLineDash([])
-      if(gridSize<0){
-        // 分割モード: gridSize=-2/-3/-4
-        const n=-gridSize
-        ctx.lineWidth=1.5
-        for(let i=1;i<n;i++){
-          const x=CW*i/n
-          ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,CH);ctx.stroke()
-        }
-        for(let i=1;i<n;i++){
-          const y=CH*i/n
-          ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(CW,y);ctx.stroke()
-        }
-      } else {
-        ctx.lineWidth=1
-        for(let x=0;x<=CW;x+=gridSize){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,CH);ctx.stroke()}
-        for(let y=0;y<=CH;y+=gridSize){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(CW,y);ctx.stroke()}
-      }
-      ctx.globalAlpha=1
-    }
-    const sel=selRef.current,xform=xfRef.current
-    if(xform&&xform.panel==='right'){
-      const {rect,angle,content,origRect:or}=xform,mcx=rect.x+rect.w/2,mcy=rect.y+rect.h/2
-      ctx.save();ctx.translate(mcx,mcy);ctx.rotate(angle)
-      ctx.drawImage(content,(or||rect).x,(or||rect).y,(or||rect).w,(or||rect).h,-rect.w/2,-rect.h/2,rect.w,rect.h)
-      ctx.restore()
-    } else if(S.current.selPanel==='right'&&sel){drawSelPath(ctx,sel)}
-  },[])
-
-  const leftComposite = useCallback(()=>{
-    const disp=photoDispRef.current;if(!disp)return
-    const ctx=disp.getContext('2d');ctx.clearRect(0,0,CW,CH)
-    ctx.fillStyle='#ffffff';ctx.fillRect(0,0,CW,CH)
-    const {practiceMode,practiceStyle,practiceObject,refOpacity}=S.current
-    if(practiceMode&&threeRef.current?.rendered){
-      // Three.js WebGL render → 2D canvas
-      ctx.drawImage(threeRef.current.renderer.domElement,0,0,CW,CH)
-    } else {
-      if(practiceMode){ctx.fillStyle='#ffffff';ctx.fillRect(0,0,CW,CH)}
-      if(refImageEl.current&&!photoBakedRef.current){
-        ctx.globalAlpha=refOpacity/100
-        const img=refImageEl.current
-        const pAR=img.naturalWidth/img.naturalHeight,cAR=CW/CH
-        let dw,dh,dx=0,dy=0
-        if(pAR>cAR){dw=CW;dh=CW/pAR;dy=(CH-dh)/2}
-        else{dh=CH;dw=CH*pAR;dx=CW-dw}
-        ctx.drawImage(img,dx,dy,dw,dh)
-        ctx.globalAlpha=1
-      }
-      if(practiceMode&&practiceObject){
-        const _sc=Math.min(CW,CH)*.45
+    const {w:cw,h:ch}=cvRef.current
+    const ctx=disp.getContext('2d')
+    ctx.clearRect(0,0,cw,ch)
+    ctx.fillStyle='#fff';ctx.fillRect(0,0,cw,ch)
+    const {practiceMode,practiceStyle,practiceObject,refOpacity,layers,showGrid,gridSize,gridOpacity,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity}=S.current
+    // Left half: photo or practice
+    if(practiceMode){
+      if(practiceCategory==='flat'){
+        drawFlatPractice(ctx,practiceObject,cw/2,ch,flatStyle)
+      } else if(threeRef.current?.rendered){
+        ctx.drawImage(threeRef.current.renderer.domElement,0,0,cw/2,ch)
+      } else if(practiceObject){
+        const _sc=Math.min(cw/2,ch)*.45
         const _groundOff={mushroom:.48,rocket:.50,snowman:.48,lamp:.48,crystal:.54,hourglass:.46,cube:.28,sphere:.38,torus:.147,octahedron:.44,cone:.42}
-        const _gY=CH*.75
-        const _off=_groundOff[practiceObject.type]??0.46
-        const _cy=_gY-_sc*_off
-        ctx.beginPath();ctx.moveTo(CW*.08,_gY);ctx.lineTo(CW*.92,_gY)
+        const _gY=ch*.75,_off=_groundOff[practiceObject.type]??0.46,_cy=_gY-_sc*_off
+        ctx.beginPath();ctx.moveTo(cw*.04,_gY);ctx.lineTo(cw*.46,_gY)
         ctx.strokeStyle='rgba(100,96,90,0.35)';ctx.lineWidth=1.5;ctx.setLineDash([]);ctx.stroke()
-        drawCompound(ctx,practiceObject,CW/2,_cy,_sc,practiceStyle)
+        drawCompound(ctx,practiceObject,cw/4,_cy,_sc,practiceStyle)
       }
-    }
-    if(!S.current.practiceMode){
-      if(photoBakedRef.current&&bakedImageRef.current){
-        ctx.globalAlpha=S.current.refOpacity/100
-        ctx.drawImage(bakedImageRef.current,0,0)
-        ctx.globalAlpha=1
-      }
-      if(photoCanvas.current){ctx.drawImage(photoCanvas.current,0,0)}
-    }
-    const {showGrid,gridSize,gridOpacity}=S.current
-    if(showGrid){
-      ctx.globalAlpha=gridOpacity/100;ctx.strokeStyle='#3366ff';ctx.setLineDash([])
-      if(gridSize<0){
-        const n=-gridSize;ctx.lineWidth=1.5
-        for(let i=1;i<n;i++){const x=CW*i/n;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,CH);ctx.stroke()}
-        for(let i=1;i<n;i++){const y=CH*i/n;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(CW,y);ctx.stroke()}
-      } else {
-        ctx.lineWidth=1
-        for(let x=0;x<=CW;x+=gridSize){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,CH);ctx.stroke()}
-        for(let y=0;y<=CH;y+=gridSize){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(CW,y);ctx.stroke()}
-      }
+    } else if(photoLayerCanvas.current&&refImageEl.current){
+      ctx.globalAlpha=refOpacity/100
+      ctx.drawImage(photoLayerCanvas.current,0,0)
       ctx.globalAlpha=1
     }
+    // Paper: clip to right half so photo shows on left
+    const paper=layers.find(l=>l.isPaper)
+    if(paper?.visible){
+      const lc=layerCanvases.current[paper.id];if(lc){
+        ctx.save();ctx.beginPath();ctx.rect(cw/2,0,cw/2,ch);ctx.clip()
+        ctx.globalAlpha=paper.opacity/100;ctx.drawImage(lc,0,0);ctx.globalAlpha=1
+        ctx.restore()
+      }
+    }
+    // ── Reference / practice overlay on right half (trace guide) ──
+    if(!practiceMode&&refOverlay&&photoLayerCanvas.current){
+      // src: left half of photoLayerCanvas → dst: right half of display
+      ctx.save();ctx.beginPath();ctx.rect(cw/2,0,cw/2,ch);ctx.clip()
+      ctx.globalAlpha=refOverlayOpacity/100
+      ctx.drawImage(photoLayerCanvas.current,0,0,cw/2,ch,cw/2,0,cw/2,ch)
+      ctx.globalAlpha=1;ctx.restore()
+    }
+    if(practiceMode&&practiceOverlay){
+      ctx.save();ctx.beginPath();ctx.rect(cw/2,0,cw/2,ch);ctx.clip()
+      ctx.globalAlpha=practiceOverlayOpacity/100
+      if(practiceCategory==='flat'){
+        drawFlatPractice(ctx,practiceObject,cw/2,ch,flatStyle,cw/2,0)
+      } else if(threeRef.current?.rendered){
+        ctx.drawImage(threeRef.current.renderer.domElement,cw/2,0,cw/2,ch)
+      }
+      ctx.globalAlpha=1;ctx.restore()
+    }
+    // Drawing layers: full canvas, bottom to top
+    const dl=layers.filter(l=>!l.isPaper)
+    for(const l of dl){
+      if(!l.visible)continue
+      const lc=layerCanvases.current[l.id];if(!lc)continue
+      ctx.globalAlpha=l.opacity/100;ctx.drawImage(lc,0,0);ctx.globalAlpha=1
+    }
+    // Grid — drawn independently for each half
+    if(showGrid){
+      ctx.globalAlpha=gridOpacity/100;ctx.strokeStyle='#3366ff';ctx.setLineDash([])
+      const drawHalfGrid=(x0,hw)=>{
+        ctx.save();ctx.beginPath();ctx.rect(x0,0,hw,ch);ctx.clip()
+        if(gridSize<0){
+          const n=-gridSize;ctx.lineWidth=1.5
+          for(let i=1;i<n;i++){const x=x0+hw*i/n;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,ch);ctx.stroke()}
+          for(let i=1;i<n;i++){const y=ch*i/n;ctx.beginPath();ctx.moveTo(x0,y);ctx.lineTo(x0+hw,y);ctx.stroke()}
+        } else {
+          ctx.lineWidth=1
+          for(let x=x0;x<=x0+hw+1;x+=gridSize){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,ch);ctx.stroke()}
+          for(let y=0;y<=ch+1;y+=gridSize){ctx.beginPath();ctx.moveTo(x0,y);ctx.lineTo(x0+hw,y);ctx.stroke()}
+        }
+        ctx.restore()
+      }
+      drawHalfGrid(0,cw/2)
+      drawHalfGrid(cw/2,cw/2)
+      ctx.globalAlpha=1
+    }
+    // Center divider guide
     ctx.save();ctx.globalAlpha=.18;ctx.strokeStyle='#888';ctx.lineWidth=1;ctx.setLineDash([])
-    ctx.beginPath();ctx.moveTo(CW/2,0);ctx.lineTo(CW/2,CH);ctx.stroke()
-    ctx.beginPath();ctx.moveTo(0,CH/2);ctx.lineTo(CW,CH/2);ctx.stroke();ctx.restore()
-    const sel=selRef.current,xform=xfRef.current
-    if(xform&&xform.panel==='left'){
+    ctx.beginPath();ctx.moveTo(cw/2,0);ctx.lineTo(cw/2,ch);ctx.stroke();ctx.restore()
+    // Selection / transform preview
+    const xform=xfRef.current
+    if(xform){
       const {rect,angle,content,origRect:or}=xform,mcx=rect.x+rect.w/2,mcy=rect.y+rect.h/2
       ctx.save();ctx.translate(mcx,mcy);ctx.rotate(angle)
       ctx.drawImage(content,(or||rect).x,(or||rect).y,(or||rect).w,(or||rect).h,-rect.w/2,-rect.h/2,rect.w,rect.h)
       ctx.restore()
-    } else if(S.current.selPanel==='left'&&sel){drawSelPath(ctx,sel)}
-    // ライブプレビュー用オーバーレイをクリア（コミット後に残らないように）
-    const ov=photoOverlayRef.current;if(ov)ov.getContext('2d').clearRect(0,0,CW,CH)
+    } else if(selRef.current){drawSelPath(ctx,selRef.current)}
+    // Pen/eraser shift guide: + and ×
+    if(isDrawing.current&&shiftKeyRef.current&&penStrokeStart.current){
+      const {activeTool:at}=S.current
+      if(at===TOOLS.PEN||at===TOOLS.ERASER){
+        const {x:gx,y:gy}=penStrokeStart.current
+        const gl=Math.max(cw,ch)*2,gd=gl*Math.SQRT1_2
+        ctx.save();ctx.beginPath();ctx.rect(cw/2,0,cw/2,ch);ctx.clip()
+        ctx.strokeStyle='rgba(80,120,255,0.28)';ctx.lineWidth=1;ctx.setLineDash([4,8])
+        ctx.beginPath()
+        ctx.moveTo(gx-gl,gy);ctx.lineTo(gx+gl,gy)
+        ctx.moveTo(gx,gy-gl);ctx.lineTo(gx,gy+gl)
+        ctx.moveTo(gx-gd,gy-gd);ctx.lineTo(gx+gd,gy+gd)
+        ctx.moveTo(gx+gd,gy-gd);ctx.lineTo(gx-gd,gy+gd)
+        ctx.stroke();ctx.restore()
+      }
+    }
   },[])
 
-  useEffect(()=>{rCompRef.current=rightComposite;lCompRef.current=leftComposite},[rightComposite,leftComposite])
-  useEffect(()=>{rightComposite();leftComposite()},[rightComposite,leftComposite,rev])
-  useEffect(()=>{rCompRef.current?.()},[photoLayerIdx])
-  useEffect(()=>{rCompRef.current?.();lCompRef.current?.()},[showGrid,gridSize,gridOpacity])
-  useEffect(()=>{rCompRef.current?.()},[refOpacity,refOverlay,refOverlayOpacity])
-  useEffect(()=>{lCompRef.current?.()},[refOpacity])
-  useEffect(()=>{lCompRef.current?.()},[practiceStyle,practiceMode,practiceObject])
-  useEffect(()=>{rCompRef.current?.()},[layers])
+  useEffect(()=>{compRef.current=comp},[comp])
+  useEffect(()=>{comp()},[comp,rev])
+  useEffect(()=>{comp()},[comp,showGrid,gridSize,gridOpacity])
+  useEffect(()=>{comp()},[comp,refOpacity])
+  useEffect(()=>{comp()},[comp,layers])
+  useEffect(()=>{comp()},[comp,practiceStyle,practiceMode,practiceObject,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity])
+  useEffect(()=>{
+    if(activeTool!==TOOLS.RULER&&placingRulerIdRef.current){
+      setRulers(rs=>rs.filter(r=>r.id!==placingRulerIdRef.current))
+      placingRulerIdRef.current=null;placingRulerStartRef.current=null
+    }
+  },[activeTool])
+  const prevCvRef=useRef({w:DEFAULT_W,h:DEFAULT_H})
+  useEffect(()=>{
+    const{w:pw,h:ph}=prevCvRef.current
+    if(pw!==cvW||ph!==cvH){
+      const sx=cvW/pw,sy=cvH/ph
+      setRulers(rs=>rs.map(r=>({...r,x1:r.x1*sx,y1:r.y1*sy,x2:r.x2*sx,y2:r.y2*sy})))
+      prevCvRef.current={w:cvW,h:cvH}
+    }
+  },[cvW,cvH])
 
   useEffect(()=>{
     const el=drawAreaRef.current;if(!el)return
     const onWheel=e=>{
       e.preventDefault()
+      const disp=displayRef.current
+      if(disp&&S.current.practiceMode&&!S.current.practiceDrawMode){
+        const r=disp.getBoundingClientRect()
+        if(e.clientX<r.left+r.width/2){
+          setPracticeOrbit(o=>({...o,zoom:Math.max(.25,Math.min(4,o.zoom*(e.deltaY>0?.88:1.14)))}))
+          return
+        }
+      }
       setViewZoom(z=>Math.round(Math.min(400,Math.max(20,z*Math.pow(0.999,e.deltaY)))))
     }
     el.addEventListener('wheel',onWheel,{passive:false})
     return()=>el.removeEventListener('wheel',onWheel)
   },[])
 
-  // ── Fit mode: measure canvas-area and compute exact display dims ──
-  const calcFitDims = useCallback(()=>{
-    const el=canvasAreaRef.current; if(!el||!refImageSize){setFitDims(null);return}
-    const aw=el.offsetWidth, ah=el.offsetHeight
-    if(!aw||!ah){setFitDims(null);return}
-    const pAR=refImageSize.w/refImageSize.h
-    const sr=S.current.splitRatio
-    const pw=aw*sr/(100-sr)
-    const cAR=CW/CH
-    let cw,ch
-    if(pw/ah>cAR){ch=ah;cw=ah*cAR}else{cw=pw;ch=pw/cAR}
-    // fw×fh = photo image display size (container / clip rect)
-    // cw×ch = full canvas display size (4:3, no distortion)
-    let fw,fh,ftop
-    if(pAR<cAR){fh=ch;fw=ch*pAR;ftop=(ah-ch)/2}
-    else{fw=cw;fh=cw/pAR;ftop=(ah-fh)/2}
-    setFitDims({w:Math.round(fw),h:Math.round(fh),cw:Math.round(cw),ch:Math.round(ch),top:Math.round(ftop)})
-  },[refImageSize])
-
-  useEffect(()=>{
-    calcFitDims()
-    const el=canvasAreaRef.current; if(!el)return
-    const ro=new ResizeObserver(calcFitDims)
-    ro.observe(el)
-    return ()=>ro.disconnect()
-  },[calcFitDims])
-
-  useEffect(()=>{ calcFitDims() },[splitRatio, calcFitDims])
-
-  // redraw after canvas remounts when fitDims changes
-  useEffect(()=>{rCompRef.current?.();lCompRef.current?.()},[fitDims])
-
   // ── Three.js scene ────────────────────────────────────────────
   useEffect(()=>{
-    if(!practiceMode||!practiceObject){
-      if(threeRef.current) threeRef.current.rendered=false
-      return
+    if(!practiceMode||!practiceObject||practiceCategory==='flat'){
+      if(threeRef.current)threeRef.current.rendered=false
+      compRef.current?.();return
     }
-    // Init renderer once
+    const {w:cw,h:ch}=cvRef.current
     if(!threeRef.current){
       const renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true})
-      renderer.setSize(CW,CH);renderer.setPixelRatio(1)
-      renderer.shadowMap.enabled=true
-      renderer.shadowMap.type=THREE.PCFSoftShadowMap
+      renderer.setSize(Math.round(cw/2),ch);renderer.setPixelRatio(1)
+      renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap
       threeRef.current={renderer,rendered:false}
+    } else {
+      threeRef.current.renderer.setSize(Math.round(cw/2),ch)
     }
     const {renderer}=threeRef.current
-    // Camera from orbit state
     const {rx=.3,ry=.2,rz=0,zoom=1}=practiceOrbit
     const dist=4.2/Math.max(.2,zoom)
-    const camera=new THREE.PerspectiveCamera(38,CW/CH,.1,100)
+    const camera=new THREE.PerspectiveCamera(38,(cw/2)/ch,.1,100)
     camera.position.set(dist*Math.sin(ry)*Math.cos(rx),dist*Math.sin(rx),dist*Math.cos(ry)*Math.cos(rx))
-    camera.lookAt(0,-0.6,0)
-    // Scene
     const scene=new THREE.Scene()
     const isWire=practiceStyle==='wireframe'
     scene.background=new THREE.Color(isWire?0xffffff:0x878784)
@@ -1019,7 +1034,6 @@ export default function App() {
       const gnd=new THREE.Mesh(new THREE.PlaneGeometry(14,14),new THREE.ShadowMaterial({opacity:.2}))
       gnd.rotation.x=-Math.PI/2;gnd.position.y=-1.38;gnd.receiveShadow=true;scene.add(gnd)
     }
-    // Object
     const mat=buildThreeMat(practiceStyle)
     const obj3d=buildThreeObj(practiceObject.type,mat,practiceStyle)
     if(obj3d){
@@ -1028,29 +1042,39 @@ export default function App() {
       obj3d.updateMatrixWorld(true)
       const box=new THREE.Box3().setFromObject(obj3d)
       obj3d.position.y=-1.38-box.min.y
+      obj3d.updateMatrixWorld(true)
+      const box2=new THREE.Box3().setFromObject(obj3d)
+      // pyramid: look at lower 30% so tip is prominent; others: bounding box center
+      const lookY=practiceObject.type==='pyramid'
+        ?box2.min.y+(box2.max.y-box2.min.y)*.3
+        :box2.getCenter(new THREE.Vector3()).y
+      camera.lookAt(0,lookY,0)
       scene.add(obj3d)
     }
     renderer.render(scene,camera)
     threeRef.current.rendered=true
-    lCompRef.current?.();tick()
+    compRef.current?.();tick()
     return()=>{
       scene.traverse(o=>{if(o.isMesh){o.geometry.dispose();(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.dispose())}})
     }
-  },[practiceObject,practiceStyle,practiceMode,practiceOrbit])
+  },[practiceObject,practiceStyle,practiceMode,practiceOrbit,practiceCategory,cvW,cvH])
 
   useEffect(()=>{
     if(!practiceMode&&threeRef.current){
-      threeRef.current.renderer.dispose();threeRef.current=null;lCompRef.current?.()
+      threeRef.current.renderer.dispose();threeRef.current=null;compRef.current?.()
     }
   },[practiceMode])
 
   const tick=useCallback(()=>setRev(r=>r+1),[])
 
+  const TOOL_SNAP=4
+  const MOVE_SHIFT_STEP=8
   const startToolDrag=useCallback((toolId,e,initialPos)=>{
     const startMX=e.clientX,startMY=e.clientY
     let latest=null
     const move=me=>{
-      const nx=initialPos.x+(me.clientX-startMX),ny=initialPos.y+(me.clientY-startMY)
+      const raw_x=initialPos.x+(me.clientX-startMX),raw_y=initialPos.y+(me.clientY-startMY)
+      const nx=Math.round(raw_x/TOOL_SNAP)*TOOL_SNAP,ny=Math.round(raw_y/TOOL_SNAP)*TOOL_SNAP
       setToolPositions(prev=>{latest={...prev,[toolId]:{x:nx,y:ny}};return latest})
     }
     const up=()=>{
@@ -1067,378 +1091,316 @@ export default function App() {
       case'select':return<TB label="選択範囲" active={activeTool===TOOLS.SELECT} onClick={()=>setActiveTool(TOOLS.SELECT)}><SelectIcon/></TB>
       case'move':return<TB label="レイヤー移動" active={activeTool===TOOLS.MOVE} onClick={()=>setActiveTool(TOOLS.MOVE)}><MoveIcon/></TB>
       case'line':return<TB label="直線" active={activeTool===TOOLS.LINE} onClick={()=>setActiveTool(TOOLS.LINE)}><LineIcon/></TB>
-      case'ruler':return<TB label="定規" active={showRuler} onClick={()=>{if(showRuler){setShowRuler(false);setRulers([]);setActiveRulerId(null)}else{setShowRuler(true);setActiveTool(TOOLS.RULER)}}}><RulerIcon/></TB>
+      case'ruler':return<TB label="定規" active={showRuler} onClick={()=>{if(showRuler){setShowRuler(false);setRulers([]);setActiveRulerId(null);placingRulerIdRef.current=null;placingRulerStartRef.current=null}else{setShowRuler(true);setActiveTool(TOOLS.RULER)}}}><RulerIcon/></TB>
       case'grid':return<TB label="マス目" active={showGrid} onClick={()=>setShowGrid(v=>!v)}><GridIcon/></TB>
       case'hand':return<TB label="手のひら移動 (H)" active={activeTool===TOOLS.HAND} onClick={()=>setActiveTool(TOOLS.HAND)}><HandIcon/></TB>
       default:return null
     }
   },[activeTool,showRuler,showGrid])
 
-  const getPR=panel=>({
-    disp:panel==='left'
-      ?(S.current.practiceMode&&S.current.practiceDrawMode?practiceOverlayRef.current:(photoOverlayRef.current??photoDispRef.current))
-      :displayRef.current,
-    draw:panel==='left'
-      ?(S.current.practiceMode?practiceOverlayRef.current:photoCanvas.current)
-      :(S.current.activeLayerId==='photo'?photoCanvas.current:layerCanvases.current[S.current.activeLayerId]),
-    comp:()=>panel==='left'?lCompRef.current():rCompRef.current(),
-  })
-  const toPt=(e,disp)=>{if(!disp)return{x:0,y:0};const r=disp.getBoundingClientRect();return{x:(e.clientX-r.left)*(CW/r.width),y:(e.clientY-r.top)*(CH/r.height)}}
+  const toPt=e=>{
+    const disp=displayRef.current;if(!disp)return{x:0,y:0}
+    const r=disp.getBoundingClientRect()
+    const {w:cw,h:ch}=cvRef.current
+    return{x:(e.clientX-r.left)*(cw/r.width),y:(e.clientY-r.top)*(ch/r.height)}
+  }
 
   // ── Handlers ──────────────────────────────────────────────────
-  const makeHandlers=panel=>{
-    const onPointerDown=e=>{
-      if(S.current.activeTool===TOOLS.HAND){
-        e.preventDefault()
-        panStartRef.current={px:e.clientX,py:e.clientY,ox:panOffsetRef.current.x,oy:panOffsetRef.current.y}
-        const onMove=ev=>{
-          if(!panStartRef.current)return
-          const nx=panStartRef.current.ox+(ev.clientX-panStartRef.current.px)
-          const ny=panStartRef.current.oy+(ev.clientY-panStartRef.current.py)
-          panOffsetRef.current={x:nx,y:ny};setPanOffset({x:nx,y:ny})
-        }
-        const onUp=()=>{
-          panStartRef.current=null
-          window.removeEventListener('pointermove',onMove)
-          window.removeEventListener('pointerup',onUp)
-          window.removeEventListener('pointercancel',onUp)
-        }
-        window.addEventListener('pointermove',onMove)
-        window.addEventListener('pointerup',onUp)
-        window.addEventListener('pointercancel',onUp)
-        return
-      }
-      if(xfRef.current)return;e.preventDefault()
-      // Auto-bake photo into bakedImageRef on first interaction with the photo panel
-      if(panel==='left'&&!S.current.practiceMode&&!photoBakedRef.current&&refImageEl.current){
-        const img=refImageEl.current
-        const pAR=img.naturalWidth/img.naturalHeight,cAR=CW/CH
-        let dw,dh,dx=0,dy=0
-        if(pAR>cAR){dw=CW;dh=CW/pAR;dy=(CH-dh)/2}else{dh=CH;dw=CH*pAR;dx=CW-dw}
-        if(!bakedImageRef.current){const c=document.createElement('canvas');c.width=CW;c.height=CH;bakedImageRef.current=c}
-        const bctx=bakedImageRef.current.getContext('2d');bctx.clearRect(0,0,CW,CH);bctx.drawImage(img,dx,dy,dw,dh)
-        photoBakedRef.current=true
-        lCompRef.current?.()
-      }
-      const {disp,draw,comp}=getPR(panel),pt=toPt(e,disp)
-      const {activeTool,penColor,penSize,eraserSize}=S.current
-      const activeSize=activeTool===TOOLS.ERASER?eraserSize:penSize
-      disp?.setPointerCapture(e.pointerId)
-      if(activeTool===TOOLS.RULER){
-        isDrawing.current=true
-        const nid=Date.now()
-        const{rulerType:rt,rulerDivisions:rd,penColor:pc}=S.current
-        setRulers(rs=>[...rs,{id:nid,x1:pt.x,y1:pt.y,x2:pt.x,y2:pt.y,type:rt,divisions:rd,color:pc}])
-        setActiveRulerId(nid);placingRulerIdRef.current=nid
-        return
-      }
-      if(activeTool===TOOLS.SELECT){
-        const sel=selRef.current
-        if(S.current.selPanel===panel&&sel&&inRect(pt,sel)){
-          isDrawing.current=true;selMoveStart.current=pt;selMoveOrigR.current={...sel}
-          if(draw){const snap=document.createElement('canvas');snap.width=CW;snap.height=CH;snap.getContext('2d').drawImage(draw,0,0);selMoveSnap.current=snap;const ctx=draw.getContext('2d');ctx.save();applySelClip(ctx,sel);ctx.clearRect(0,0,CW,CH);ctx.restore();comp()}
-        } else {isDrawing.current=true;selPtsRef.current=[pt];setSel(null);setSelPanel(null);comp()}
-        return
-      }
-      isDrawing.current=true;lastPt.current=pt
-      if(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER){
-        const ctx=draw?.getContext('2d');if(!ctx)return
-        if(S.current.practiceMode&&S.current.practiceDrawMode){saveHist('left');saveHist('right')}
-        else if(refImageEl.current&&!S.current.practiceMode){saveHist('left');saveHist('right')}
-        else saveHist(panel)
-        penStrokeStart.current=pt
-        lastPt.current=pt
-        lastClientXY.current={x:e.clientX,y:e.clientY}
-        const pr=e.pointerType==='pen'?Math.max(0.05,e.pressure):1
-        const sz=Math.max(1,activeSize*pr)
-        ctx.globalCompositeOperation=activeTool===TOOLS.ERASER?'destination-out':'source-over'
-        ctx.fillStyle=activeTool===TOOLS.ERASER?'rgba(0,0,0,1)':penColor
-        ctx.beginPath();ctx.arc(pt.x,pt.y,sz/2,0,Math.PI*2);ctx.fill()
-        comp();tick()
-      } else if(activeTool===TOOLS.LINE){
-        const {showGrid:sg,gridSize:gs}=S.current
-        const spt=e.shiftKey&&sg?applySnap(pt,{gridSnap:true,gridSize:gs}):pt
-        lineStart.current=spt;lineStartScreen.current={x:e.clientX,y:e.clientY}
-        saveHist('left');saveHist('right')
-      }
-      else if(activeTool===TOOLS.MOVE){
-        moveOrigin.current=pt;saveHist(panel)
-        if(draw){const s=document.createElement('canvas');s.width=CW;s.height=CH;s.getContext('2d').drawImage(draw,0,0);moveSnap.current=s}
-      }
-    }
-
-    const onPointerMove=e=>{
-      if(!isDrawing.current)return
-      const {disp,draw,comp}=getPR(panel),pt=toPt(e,disp)
-      const {activeTool,penColor,penSize,eraserSize}=S.current
-      const activeSize=activeTool===TOOLS.ERASER?eraserSize:penSize
-      if(activeTool===TOOLS.RULER){
-        const pid=placingRulerIdRef.current;if(!pid)return
-        setRulers(rs=>rs.map(r=>r.id===pid?{...r,x2:pt.x,y2:pt.y}:r))
-        return
-      }
-      if(activeTool===TOOLS.SELECT){
-        if(selMoveStart.current&&selMoveSnap.current){
-          const dx=pt.x-selMoveStart.current.x,dy=pt.y-selMoveStart.current.y
-          const orig=selMoveOrigR.current;if(!draw)return
-          const ctx=draw.getContext('2d')
-          ctx.clearRect(0,0,CW,CH);ctx.drawImage(selMoveSnap.current,0,0)
-          ctx.save();applySelClip(ctx,orig);ctx.clearRect(0,0,CW,CH);ctx.restore()
-          ctx.save()
-          if(orig.pts){ctx.beginPath();orig.pts.forEach((p,i)=>i===0?ctx.moveTo(p.x+dx,p.y+dy):ctx.lineTo(p.x+dx,p.y+dy));ctx.closePath();ctx.clip()}
-          else{ctx.beginPath();ctx.rect(orig.x+dx,orig.y+dy,orig.w,orig.h);ctx.clip()}
-          ctx.drawImage(selMoveSnap.current,dx,dy);ctx.restore()
-          const ns=orig.pts?{...orig,x:orig.x+dx,y:orig.y+dy,pts:orig.pts.map(p=>({x:p.x+dx,y:p.y+dy}))}:{...orig,x:orig.x+dx,y:orig.y+dy}
-          setSel(ns);comp();return
-        }
-        if(selPtsRef.current.length>0){
-          selPtsRef.current=[...selPtsRef.current,pt]
-          const pts=selPtsRef.current,xs=pts.map(p=>p.x),ys=pts.map(p=>p.y)
-          const x=Math.min(...xs),y=Math.min(...ys),w=Math.max(...xs)-x,h=Math.max(...ys)-y
-          setSel({pts,x,y,w,h});setSelPanel(panel);comp()
-        }
-        return
-      }
-      if(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER){
-        if(S.current.practiceMode&&S.current.practiceDrawMode&&lastClientXY.current){
-          const ls=lastClientXY.current,cs={x:e.clientX,y:e.clientY}
-          const _dtc=(dispEl,drawEl)=>{
-            if(!dispEl||!drawEl)return
-            const r=dispEl.getBoundingClientRect()
-            const seg=clipLineToBBox(ls.x,ls.y,cs.x,cs.y,r.left,r.top,r.right,r.bottom)
-            if(!seg)return
-            const p1=screenToCv(seg[0],seg[1],r),p2=screenToCv(seg[2],seg[3],r)
-            const dctx=drawEl.getContext('2d')
-            dctx.globalCompositeOperation=activeTool===TOOLS.ERASER?'destination-out':'source-over'
-            dctx.strokeStyle=activeTool===TOOLS.ERASER?'rgba(0,0,0,1)':penColor
-            dctx.lineWidth=activeSize;dctx.lineCap='round';dctx.lineJoin='round'
-            dctx.beginPath();dctx.moveTo(p1.x,p1.y);dctx.lineTo(p2.x,p2.y);dctx.stroke()
-          }
-          _dtc(photoDispRef.current,getPR('left').draw)
-          _dtc(displayRef.current,getPR('right').draw)
-          lastClientXY.current=cs
-          lCompRef.current?.();rCompRef.current?.();tick()
-        } else {
-          const ctx=draw?.getContext('2d');if(!ctx)return
-          const pr=e.pointerType==='pen'?Math.max(0.05,e.pressure):1
-          const sz=Math.max(1,activeSize*pr)
-          ctx.globalCompositeOperation=activeTool===TOOLS.ERASER?'destination-out':'source-over'
-          ctx.strokeStyle=activeTool===TOOLS.ERASER?'rgba(0,0,0,1)':penColor
-          ctx.lineWidth=sz;ctx.lineCap='round';ctx.lineJoin='round'
-          const spt=e.shiftKey&&activeTool===TOOLS.PEN&&penStrokeStart.current
-            ?applySnap(pt,{hvFrom:penStrokeStart.current})
-            :pt
-          ctx.beginPath();ctx.moveTo(lastPt.current.x,lastPt.current.y);ctx.lineTo(spt.x,spt.y);ctx.stroke()
-          lastPt.current=spt
-          if(lastClientXY.current&&refImageEl.current&&!S.current.practiceMode){
-            const ls=lastClientXY.current,cs={x:e.clientX,y:e.clientY}
-            const oppPanel=panel==='right'?'left':'right'
-            const oppDisp=panel==='right'?photoDispRef.current:displayRef.current
-            const oppDraw=getPR(oppPanel).draw
-            if(oppDisp&&oppDraw){
-              const r=oppDisp.getBoundingClientRect()
-              const seg=clipLineToBBox(ls.x,ls.y,cs.x,cs.y,r.left,r.top,r.right,r.bottom)
-              if(seg){
-                const p1=screenToCv(seg[0],seg[1],r),p2=screenToCv(seg[2],seg[3],r)
-                const dctx=oppDraw.getContext('2d')
-                dctx.globalCompositeOperation=activeTool===TOOLS.ERASER?'destination-out':'source-over'
-                dctx.strokeStyle=activeTool===TOOLS.ERASER?'rgba(0,0,0,1)':penColor
-                dctx.lineWidth=sz;dctx.lineCap='round';dctx.lineJoin='round'
-                dctx.beginPath();dctx.moveTo(p1.x,p1.y);dctx.lineTo(p2.x,p2.y);dctx.stroke()
-                if(panel==='right')lCompRef.current?.();else rCompRef.current?.()
-              }
-            }
-            lastClientXY.current=cs
-          }
-          comp();tick()
-        }
-      } else if(activeTool===TOOLS.LINE&&lineStart.current&&lineStartScreen.current){
-        let ex=e.clientX,ey=e.clientY
-        const sx=lineStartScreen.current.x,sy=lineStartScreen.current.y
-        if(e.shiftKey){const a=Math.round(Math.atan2(ey-sy,ex-sx)/(Math.PI/2))*(Math.PI/2);const l=Math.sqrt((ex-sx)**2+(ey-sy)**2);ex=sx+Math.cos(a)*l;ey=sy+Math.sin(a)*l}
-        lCompRef.current?.();rCompRef.current?.()
-        const _dp=c=>{if(!c)return;const r=c.getBoundingClientRect();const seg=clipLineToBBox(sx,sy,ex,ey,r.left,r.top,r.right,r.bottom);if(!seg)return;const p1=screenToCv(seg[0],seg[1],r),p2=screenToCv(seg[2],seg[3],r);const ctx=c.getContext('2d');ctx.strokeStyle=penColor;ctx.lineWidth=penSize;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(p1.x,p1.y);ctx.lineTo(p2.x,p2.y);ctx.stroke()}
-        _dp(displayRef.current);_dp(photoDispRef.current)
-      } else if(activeTool===TOOLS.MOVE&&moveOrigin.current&&moveSnap.current){
-        const ctx=draw?.getContext('2d');if(!ctx)return
-        let ox=pt.x-moveOrigin.current.x,oy=pt.y-moveOrigin.current.y
-        if(e.shiftKey){
-          const {showGrid:sg,gridSize:gs}=S.current
-          if(Math.abs(pt.x-moveOrigin.current.x)>=Math.abs(pt.y-moveOrigin.current.y)){oy=0;if(sg)ox=Math.round(ox/gs)*gs}
-          else{ox=0;if(sg)oy=Math.round(oy/gs)*gs}
-        }
-        ctx.clearRect(0,0,CW,CH);ctx.drawImage(moveSnap.current,ox,oy)
-        comp();tick()
-      }
-    }
-
-    const onPointerUp=e=>{
-      if(!isDrawing.current)return;isDrawing.current=false
-      const {disp,draw,comp}=getPR(panel),pt=toPt(e,disp)
-      const {activeTool,penColor,penSize}=S.current
-      if(activeTool===TOOLS.RULER){isDrawing.current=false;placingRulerIdRef.current=null;return}
-      if(activeTool===TOOLS.SELECT){
-        if(selMoveStart.current){selMoveStart.current=null;selMoveSnap.current=null;selMoveOrigR.current=null;comp();tick()}
-        else if(selPtsRef.current.length>1){
-          const pts=[...selPtsRef.current,selPtsRef.current[0]]
-          const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y)
-          const x=Math.min(...xs),y=Math.min(...ys),w=Math.max(...xs)-x,h=Math.max(...ys)-y
-          setSel({pts,x,y,w,h});setSelPanel(panel);comp();selPtsRef.current=[]
-        }
-        return
-      }
-      if(activeTool===TOOLS.LINE&&lineStart.current&&lineStartScreen.current){
-        const {penColor:pc,penSize:ps}=S.current
-        const ex0=e.clientX,ey0=e.clientY
-        const sx=lineStartScreen.current.x,sy=lineStartScreen.current.y
-        const isTap=Math.sqrt((ex0-sx)**2+(ey0-sy)**2)<5
-        lineStart.current=null;lineStartScreen.current=null
-        if(isTap){
-          const ctx=draw?.getContext('2d')
-          if(ctx){ctx.globalCompositeOperation='source-over';ctx.strokeStyle=pc;ctx.lineWidth=ps;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(0,pt.y);ctx.lineTo(CW,pt.y);ctx.stroke()}
-          comp();tick()
-        } else {
-          let ex=ex0,ey=ey0
-          if(e.shiftKey){const a=Math.round(Math.atan2(ey-sy,ex-sx)/(Math.PI/2))*(Math.PI/2);const l=Math.sqrt((ex-sx)**2+(ey-sy)**2);ex=sx+Math.cos(a)*l;ey=sy+Math.sin(a)*l}
-          const _ds=(dispEl,drawEl)=>{if(!dispEl||!drawEl)return;const r=dispEl.getBoundingClientRect();const seg=clipLineToBBox(sx,sy,ex,ey,r.left,r.top,r.right,r.bottom);if(!seg)return;const p1=screenToCv(seg[0],seg[1],r),p2=screenToCv(seg[2],seg[3],r);const ctx=drawEl.getContext('2d');ctx.globalCompositeOperation='source-over';ctx.strokeStyle=pc;ctx.lineWidth=ps;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(p1.x,p1.y);ctx.lineTo(p2.x,p2.y);ctx.stroke()}
-          const rdraw=S.current.activeLayerId==='photo'?photoCanvas.current:layerCanvases.current[S.current.activeLayerId]
-          _ds(displayRef.current,rdraw)
-          if(!S.current.practiceMode||S.current.practiceDrawMode){
-            const ldraw=S.current.practiceMode?practiceOverlayRef.current:photoCanvas.current
-            _ds(photoDispRef.current,ldraw)
-          }
-          lCompRef.current?.();rCompRef.current?.();tick()
-        }
-        saveHist('left');saveHist('right');return
-      }
-      if(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER){
-        if(S.current.practiceMode&&S.current.practiceDrawMode){saveHist('left');saveHist('right')}
-        else if(refImageEl.current&&!S.current.practiceMode){saveHist('left');saveHist('right')}
-        else saveHist(panel)
-      } else if(activeTool===TOOLS.MOVE){
-        saveHist(panel)
-      }
-      lastClientXY.current=null
-      const ctx2=draw?.getContext('2d');if(ctx2)ctx2.globalCompositeOperation='source-over'
-      moveSnap.current=null;lastPt.current=null
-    }
-    const onPointerEnter=e=>{
-      if(!e.buttons||isDrawing.current)return
-      onPointerDown(e)
-    }
-    return{onPointerDown,onPointerMove,onPointerUp,onPointerLeave:onPointerUp,onPointerEnter}
-  }
-
-  const leftH=makeHandlers('left'), rightH=makeHandlers('right')
-
-  // ── Orbit handlers (practice mode left canvas) ────────────────
-  const orbitH = {
-    onPointerDown: e=>{
+  const onPointerDown=e=>{
+    const disp=displayRef.current;if(!disp)return
+    const r=disp.getBoundingClientRect()
+    const isLeftHalf=e.clientX<r.left+r.width/2
+    // Orbit: practice mode, not draw mode, left half
+    if(S.current.practiceMode&&!S.current.practiceDrawMode&&isLeftHalf){
       e.preventDefault()
-      const {rx,ry,rz,zoom}=practiceOrbit
+      const {rx,ry,rz,zoom}=S.current.practiceOrbit
       orbitDragStart.current={x:e.clientX,y:e.clientY,rx,ry,rz,zoom}
-      e.currentTarget.setPointerCapture(e.pointerId)
-    },
-    onPointerMove: e=>{
-      if(!orbitDragStart.current)return
-      const dx=e.clientX-orbitDragStart.current.x
-      const dy=e.clientY-orbitDragStart.current.y
-      const s=orbitDragStart.current
-      if(e.shiftKey){
-        setPracticeOrbit(o=>({...o,rz:s.rz+dx*.013}))
-      } else {
-        setPracticeOrbit(o=>({...o,
-          rx:Math.max(-Math.PI*.48,Math.min(Math.PI*.48,s.rx-dy*.013)),
-          ry:s.ry+dx*.013
-        }))
-      }
-    },
-    onPointerUp:   ()=>{ orbitDragStart.current=null },
-    onPointerLeave:()=>{ orbitDragStart.current=null },
-    onWheel: e=>{
+      disp.setPointerCapture(e.pointerId);return
+    }
+    // Hand tool pan
+    if(S.current.activeTool===TOOLS.HAND){
       e.preventDefault()
-      setPracticeOrbit(o=>({...o,zoom:Math.max(.25,Math.min(4,o.zoom*(e.deltaY>0?.88:1.14)))}))
+      panStartRef.current={px:e.clientX,py:e.clientY,ox:panOffsetRef.current.x,oy:panOffsetRef.current.y}
+      disp.setPointerCapture(e.pointerId);return
+    }
+    if(xfRef.current)return;e.preventDefault()
+    const pt=toPt(e)
+    const {activeTool,penColor,penSize,eraserSize}=S.current
+    const activeSize=activeTool===TOOLS.ERASER?eraserSize:penSize
+    const draw=S.current.activeLayerId===PHOTO_ID?photoLayerCanvas.current:layerCanvases.current[S.current.activeLayerId]
+    disp.setPointerCapture(e.pointerId)
+    if(activeTool===TOOLS.RULER){
+      if(placingRulerIdRef.current){
+        // 2nd tap: finalize end point
+        const rsnap=e.shiftKey&&placingRulerStartRef.current
+          ?applySnap(pt,{angleSnap:true,lineFrom:placingRulerStartRef.current}):pt
+        setRulers(rs=>rs.map(r=>r.id===placingRulerIdRef.current?{...r,x2:rsnap.x,y2:rsnap.y}:r))
+        placingRulerIdRef.current=null;placingRulerStartRef.current=null
+      } else {
+        // 1st tap: set start point
+        const nid=Date.now()
+        const{rulerType:rt,rulerDivisions:rd,rulerColor:rc}=S.current
+        setRulers(rs=>[...rs,{id:nid,x1:pt.x,y1:pt.y,x2:pt.x,y2:pt.y,type:rt,divisions:rd,color:rc}])
+        setActiveRulerId(nid);placingRulerIdRef.current=nid;placingRulerStartRef.current={x:pt.x,y:pt.y}
+      }
+      return
+    }
+    if(activeTool===TOOLS.SELECT){
+      const sel=selRef.current
+      if(sel&&inRect(pt,sel)){
+        isDrawing.current=true;selMoveStart.current=pt;selMoveOrigR.current={...sel}
+        if(draw){
+          const {w:cw,h:ch}=cvRef.current
+          const snap=document.createElement('canvas');snap.width=cw;snap.height=ch
+          snap.getContext('2d').drawImage(draw,0,0);selMoveSnap.current=snap
+          const ctx=draw.getContext('2d');ctx.save();applySelClip(ctx,sel);ctx.clearRect(0,0,cw,ch);ctx.restore();comp()
+        }
+      } else {isDrawing.current=true;selPtsRef.current=[pt];setSel(null);comp()}
+      return
+    }
+    isDrawing.current=true;lastPt.current=pt
+    if(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER){
+      const ctx=draw?.getContext('2d');if(!ctx)return
+      saveHist()
+      penStrokeStart.current=pt;penSnapDirRef.current=null;lastClientXY.current={x:e.clientX,y:e.clientY}
+      const pr=e.pointerType==='pen'?Math.max(0.05,e.pressure):1
+      const sz=Math.max(1,activeSize*pr)
+      ctx.globalCompositeOperation=activeTool===TOOLS.ERASER?'destination-out':'source-over'
+      ctx.fillStyle=activeTool===TOOLS.ERASER?'rgba(0,0,0,1)':penColor
+      ctx.beginPath();ctx.arc(pt.x,pt.y,sz/2,0,Math.PI*2);ctx.fill()
+      const {w:_cw,h:_ch}=cvRef.current
+      const _snap=document.createElement('canvas');_snap.width=_cw;_snap.height=_ch
+      _snap.getContext('2d').drawImage(draw,0,0);penShiftSnapRef.current=_snap
+      comp();tick()
+    } else if(activeTool===TOOLS.LINE){
+      const {showGrid:sg,gridSize:gs}=S.current
+      const spt=e.shiftKey&&sg?applySnap(pt,{gridSnap:true,gridSize:gs}):pt
+      lineStart.current=spt;lineStartScreen.current={x:e.clientX,y:e.clientY}
+      saveHist()
+    } else if(activeTool===TOOLS.MOVE){
+      const {w:cw,h:ch}=cvRef.current
+      moveOrigin.current=pt;saveHist()
+      if(draw){const s=document.createElement('canvas');s.width=cw;s.height=ch;s.getContext('2d').drawImage(draw,0,0);moveSnap.current=s}
     }
   }
 
-  // ── Split pane drag ───────────────────────────────────────────
-  const onSplitDragStart = useCallback(e=>{
-    e.preventDefault()
-    const el=drawAreaRef.current; if(!el)return
-    const rect=el.getBoundingClientRect()
-    splitDragRef.current={originX:rect.left,areaW:rect.width}
-    setSplitDragging(true)
-    const onMove=ev=>{
-      if(!splitDragRef.current)return
-      const {originX,areaW}=splitDragRef.current
-      setSplitRatio(Math.max(15,Math.min(85,Math.round((ev.clientX-originX)/areaW*100))))
+  const onPointerMove=e=>{
+    // Custom cursor update
+    if(cursorDivRef.current&&displayRef.current){
+      const at=S.current.activeTool
+      if(at===TOOLS.PEN||at===TOOLS.ERASER){
+        const r=displayRef.current.getBoundingClientRect()
+        const scale=r.width/cvRef.current.w
+        const sz=at===TOOLS.ERASER?S.current.eraserSize:S.current.penSize
+        const radius=Math.max(0.5,sz/2*scale)
+        const d=cursorDivRef.current
+        d.style.left=e.clientX+'px';d.style.top=e.clientY+'px'
+        d.style.width=(radius*2)+'px';d.style.height=(radius*2)+'px'
+        const cross=d.querySelector('.cur-cross')
+        if(cross)cross.style.opacity=radius<5?'1':'0'
+      }
     }
-    const onUp=()=>{
-      splitDragRef.current=null;setSplitDragging(false)
-      document.removeEventListener('pointermove',onMove)
-      document.removeEventListener('pointerup',onUp)
+    // Orbit drag
+    if(orbitDragStart.current){
+      const dx=e.clientX-orbitDragStart.current.x,dy=e.clientY-orbitDragStart.current.y
+      const s=orbitDragStart.current
+      if(e.shiftKey){setPracticeOrbit(o=>({...o,rz:s.rz+dx*.013}))}
+      else{setPracticeOrbit(o=>({...o,rx:Math.max(-Math.PI*.48,Math.min(Math.PI*.48,s.rx-dy*.013)),ry:s.ry+dx*.013}))}
+      return
     }
-    document.addEventListener('pointermove',onMove)
-    document.addEventListener('pointerup',onUp)
-  },[])
+    // Pan drag
+    if(panStartRef.current){
+      let nx=panStartRef.current.ox+(e.clientX-panStartRef.current.px)
+      let ny=panStartRef.current.oy+(e.clientY-panStartRef.current.py)
+      if(e.shiftKey){
+        const ddx=nx-panStartRef.current.ox,ddy=ny-panStartRef.current.oy
+        if(Math.abs(ddx)>=Math.abs(ddy)){ny=panStartRef.current.oy;nx=panStartRef.current.ox+Math.round(ddx/MOVE_SHIFT_STEP)*MOVE_SHIFT_STEP}
+        else{nx=panStartRef.current.ox;ny=panStartRef.current.oy+Math.round(ddy/MOVE_SHIFT_STEP)*MOVE_SHIFT_STEP}
+      }
+      panOffsetRef.current={x:nx,y:ny};setPanOffset({x:nx,y:ny});return
+    }
+    // Ruler preview: runs before isDrawing check (tap-based, no drag needed)
+    if(placingRulerIdRef.current&&S.current.activeTool===TOOLS.RULER){
+      const pid=placingRulerIdRef.current,pt0=toPt(e)
+      const rsnap=e.shiftKey&&placingRulerStartRef.current
+        ?applySnap(pt0,{angleSnap:true,lineFrom:placingRulerStartRef.current}):pt0
+      setRulers(rs=>rs.map(r=>r.id===pid?{...r,x2:rsnap.x,y2:rsnap.y}:r));return
+    }
+    if(!isDrawing.current)return
+    const pt=toPt(e)
+    const {activeTool,penColor,penSize,eraserSize}=S.current
+    const activeSize=activeTool===TOOLS.ERASER?eraserSize:penSize
+    const draw=S.current.activeLayerId===PHOTO_ID?photoLayerCanvas.current:layerCanvases.current[S.current.activeLayerId]
+    if(activeTool===TOOLS.SELECT){
+      if(selMoveStart.current&&selMoveSnap.current){
+        const {w:cw,h:ch}=cvRef.current
+        let dx=pt.x-selMoveStart.current.x,dy=pt.y-selMoveStart.current.y
+        if(e.shiftKey){
+          if(Math.abs(dx)>=Math.abs(dy)){dy=0;dx=Math.round(dx/MOVE_SHIFT_STEP)*MOVE_SHIFT_STEP}
+          else{dx=0;dy=Math.round(dy/MOVE_SHIFT_STEP)*MOVE_SHIFT_STEP}
+        }
+        const orig=selMoveOrigR.current;if(!draw)return
+        const ctx=draw.getContext('2d')
+        ctx.clearRect(0,0,cw,ch);ctx.drawImage(selMoveSnap.current,0,0)
+        ctx.save();applySelClip(ctx,orig);ctx.clearRect(0,0,cw,ch);ctx.restore()
+        ctx.save()
+        if(orig.pts){ctx.beginPath();orig.pts.forEach((p,i)=>i===0?ctx.moveTo(p.x+dx,p.y+dy):ctx.lineTo(p.x+dx,p.y+dy));ctx.closePath();ctx.clip()}
+        else{ctx.beginPath();ctx.rect(orig.x+dx,orig.y+dy,orig.w,orig.h);ctx.clip()}
+        ctx.drawImage(selMoveSnap.current,dx,dy);ctx.restore()
+        const ns=orig.pts?{...orig,x:orig.x+dx,y:orig.y+dy,pts:orig.pts.map(p=>({x:p.x+dx,y:p.y+dy}))}:{...orig,x:orig.x+dx,y:orig.y+dy}
+        setSel(ns);comp();return
+      }
+      if(selPtsRef.current.length>0){
+        selPtsRef.current=[...selPtsRef.current,pt]
+        const pts=selPtsRef.current,xs=pts.map(p=>p.x),ys=pts.map(p=>p.y)
+        const x=Math.min(...xs),y=Math.min(...ys),w=Math.max(...xs)-x,h=Math.max(...ys)-y
+        setSel({pts,x,y,w,h});comp()
+      }
+      return
+    }
+    if(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER){
+      const ctx=draw?.getContext('2d');if(!ctx)return
+      const pr=e.pointerType==='pen'?Math.max(0.05,e.pressure):1
+      const sz=Math.max(1,activeSize*pr)
+      ctx.globalCompositeOperation=activeTool===TOOLS.ERASER?'destination-out':'source-over'
+      ctx.strokeStyle=activeTool===TOOLS.ERASER?'rgba(0,0,0,1)':penColor
+      ctx.lineWidth=sz;ctx.lineCap='round';ctx.lineJoin='round'
+      if(e.shiftKey&&penStrokeStart.current&&penShiftSnapRef.current){
+        const snapped=applySnap(pt,{angleSnap:true,lineFrom:penStrokeStart.current})
+        const {w:cw2,h:ch2}=cvRef.current
+        const prevComp=ctx.globalCompositeOperation
+        ctx.globalCompositeOperation='source-over'
+        ctx.clearRect(0,0,cw2,ch2);ctx.drawImage(penShiftSnapRef.current,0,0)
+        ctx.globalCompositeOperation=prevComp
+        ctx.beginPath();ctx.moveTo(penStrokeStart.current.x,penStrokeStart.current.y);ctx.lineTo(snapped.x,snapped.y);ctx.stroke()
+        lastPt.current=snapped
+      } else {
+        ctx.beginPath();ctx.moveTo(lastPt.current.x,lastPt.current.y);ctx.lineTo(pt.x,pt.y);ctx.stroke()
+        lastPt.current=pt
+      }
+      lastClientXY.current={x:e.clientX,y:e.clientY}
+      comp();tick()
+    } else if(activeTool===TOOLS.LINE&&lineStart.current&&lineStartScreen.current){
+      comp()
+      const disp=displayRef.current;if(!disp)return
+      const {w:cw,h:ch}=cvRef.current
+      let ex=e.clientX,ey=e.clientY
+      const sx=lineStartScreen.current.x,sy=lineStartScreen.current.y
+      if(e.shiftKey){const a=Math.round(Math.atan2(ey-sy,ex-sx)/(Math.PI/4))*(Math.PI/4);const l=Math.sqrt((ex-sx)**2+(ey-sy)**2);ex=sx+Math.cos(a)*l;ey=sy+Math.sin(a)*l}
+      const rr=disp.getBoundingClientRect()
+      const seg=clipLineToBBox(sx,sy,ex,ey,rr.left,rr.top,rr.right,rr.bottom)
+      if(seg){
+        const p1=screenToCv(seg[0],seg[1],rr,cw,ch),p2=screenToCv(seg[2],seg[3],rr,cw,ch)
+        const ctx=disp.getContext('2d')
+        ctx.strokeStyle=S.current.penColor;ctx.lineWidth=S.current.penSize;ctx.lineCap='round'
+        ctx.beginPath();ctx.moveTo(p1.x,p1.y);ctx.lineTo(p2.x,p2.y);ctx.stroke()
+      }
+    } else if(activeTool===TOOLS.MOVE&&moveOrigin.current&&moveSnap.current){
+      const {w:cw,h:ch}=cvRef.current
+      const ctx=draw?.getContext('2d');if(!ctx)return
+      let ox=pt.x-moveOrigin.current.x,oy=pt.y-moveOrigin.current.y
+      if(e.shiftKey){
+        if(Math.abs(ox)>=Math.abs(oy)){oy=0;ox=Math.round(ox/MOVE_SHIFT_STEP)*MOVE_SHIFT_STEP}
+        else{ox=0;oy=Math.round(oy/MOVE_SHIFT_STEP)*MOVE_SHIFT_STEP}
+      }
+      ctx.clearRect(0,0,cw,ch);ctx.drawImage(moveSnap.current,ox,oy)
+      comp();tick()
+    }
+  }
 
-  // ── Crop handle drag ─────────────────────────────────────────
-  const onCropHandleDown = useCallback((handle,initRect,e)=>{
-    e.preventDefault();e.stopPropagation()
-    const startX=e.clientX,startY=e.clientY
-    const scale=viewZoom/100
-    const fw=fitDims?.w??0,fh=fitDims?.h??0
-    const MIN=20
-    const onMove=ev=>{
-      const dx=(ev.clientX-startX)/scale,dy=(ev.clientY-startY)/scale
-      let {x1,y1,x2,y2}=initRect
-      if(handle==='tl'||handle==='l'||handle==='bl')x1=Math.min(initRect.x2-MIN,Math.max(0,initRect.x1+dx))
-      if(handle==='tr'||handle==='r'||handle==='br')x2=Math.max(initRect.x1+MIN,Math.min(fw,initRect.x2+dx))
-      if(handle==='tl'||handle==='t'||handle==='tr')y1=Math.min(initRect.y2-MIN,Math.max(0,initRect.y1+dy))
-      if(handle==='bl'||handle==='b'||handle==='br')y2=Math.max(initRect.y1+MIN,Math.min(fh,initRect.y2+dy))
-      setCropRect({x1:Math.round(x1),y1:Math.round(y1),x2:Math.round(x2),y2:Math.round(y2)})
+  const onPointerUp=e=>{
+    if(orbitDragStart.current){orbitDragStart.current=null;return}
+    if(panStartRef.current){panStartRef.current=null;return}
+    if(!isDrawing.current)return;isDrawing.current=false
+    const pt=toPt(e)
+    const {activeTool}=S.current
+    const draw=S.current.activeLayerId===PHOTO_ID?photoLayerCanvas.current:layerCanvases.current[S.current.activeLayerId]
+    if(activeTool===TOOLS.RULER){return}
+    if(activeTool===TOOLS.SELECT){
+      if(selMoveStart.current){selMoveStart.current=null;selMoveSnap.current=null;selMoveOrigR.current=null;comp();tick()}
+      else if(selPtsRef.current.length>1){
+        const pts=[...selPtsRef.current,selPtsRef.current[0]]
+        const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y)
+        const x=Math.min(...xs),y=Math.min(...ys),w=Math.max(...xs)-x,h=Math.max(...ys)-y
+        setSel({pts,x,y,w,h});comp();selPtsRef.current=[]
+      }
+      return
     }
-    const onUp=()=>{document.removeEventListener('pointermove',onMove);document.removeEventListener('pointerup',onUp)}
-    document.addEventListener('pointermove',onMove);document.addEventListener('pointerup',onUp)
-  },[viewZoom,fitDims])
+    if(activeTool===TOOLS.LINE&&lineStart.current&&lineStartScreen.current){
+      const {penColor:pc,penSize:ps}=S.current
+      const ex0=e.clientX,ey0=e.clientY
+      const sx=lineStartScreen.current.x,sy=lineStartScreen.current.y
+      const isTap=Math.sqrt((ex0-sx)**2+(ey0-sy)**2)<5
+      lineStart.current=null;lineStartScreen.current=null
+      const disp=displayRef.current;const {w:cw,h:ch}=cvRef.current
+      if(isTap){
+        if(draw){const ctx=draw.getContext('2d');ctx.globalCompositeOperation='source-over';ctx.strokeStyle=pc;ctx.lineWidth=ps;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(0,pt.y);ctx.lineTo(cw,pt.y);ctx.stroke()}
+        comp();tick()
+      } else {
+        let ex=ex0,ey=ey0
+        if(e.shiftKey){const a=Math.round(Math.atan2(ey-sy,ex-sx)/(Math.PI/4))*(Math.PI/4);const l=Math.sqrt((ex-sx)**2+(ey-sy)**2);ex=sx+Math.cos(a)*l;ey=sy+Math.sin(a)*l}
+        if(disp&&draw){
+          const rr=disp.getBoundingClientRect()
+          const seg=clipLineToBBox(sx,sy,ex,ey,rr.left,rr.top,rr.right,rr.bottom)
+          if(seg){
+            const p1=screenToCv(seg[0],seg[1],rr,cw,ch),p2=screenToCv(seg[2],seg[3],rr,cw,ch)
+            const ctx=draw.getContext('2d')
+            ctx.globalCompositeOperation='source-over';ctx.strokeStyle=pc;ctx.lineWidth=ps;ctx.lineCap='round'
+            ctx.beginPath();ctx.moveTo(p1.x,p1.y);ctx.lineTo(p2.x,p2.y);ctx.stroke()
+          }
+        }
+        comp();tick()
+      }
+      saveHist();return
+    }
+    if(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER){saveHist()}
+    else if(activeTool===TOOLS.MOVE){saveHist()}
+    penSnapDirRef.current=null;penShiftSnapRef.current=null;lastClientXY.current=null
+    const ctx2=draw?.getContext('2d');if(ctx2)ctx2.globalCompositeOperation='source-over'
+    moveSnap.current=null;lastPt.current=null
+  }
+  const onPointerEnter=e=>{setIsCursorOnCanvas(true);if(!e.buttons||isDrawing.current)return;onPointerDown(e)}
+  const onPointerLeave=()=>setIsCursorOnCanvas(false)
 
   // ── Selection helpers ─────────────────────────────────────────
   const applySelClip=(ctx,sel)=>{ctx.beginPath();if(sel.pts){sel.pts.forEach((p,i)=>i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y));ctx.closePath()}else{ctx.rect(sel.x,sel.y,sel.w,sel.h)};ctx.clip()}
-  const deselect=()=>{
-    const p=selPanel
-    setSel(null);setSelPanel(null)
-    if(p==='left')lCompRef.current?.()
-    else if(p==='right')rCompRef.current?.()
-  }
+  const deselect=()=>{setSel(null);comp()}
+  const getActiveCanvas=()=>S.current.activeLayerId===PHOTO_ID?photoLayerCanvas.current:layerCanvases.current[S.current.activeLayerId]
   const deleteInSel=()=>{
-    if(!selRef.current||!selPanel)return;const{draw,comp}=getPR(selPanel);if(!draw)return
-    saveHist(selPanel);const ctx=draw.getContext('2d');ctx.save();applySelClip(ctx,selRef.current);ctx.clearRect(0,0,CW,CH);ctx.restore();comp();tick()
+    const {w:cw,h:ch}=cvRef.current
+    if(!selRef.current)return;const draw=getActiveCanvas();if(!draw)return
+    saveHist();const ctx=draw.getContext('2d');ctx.save();applySelClip(ctx,selRef.current);ctx.clearRect(0,0,cw,ch);ctx.restore();comp();tick()
   }
   const deleteOutSel=()=>{
-    if(!selRef.current||!selPanel)return;const{draw,comp}=getPR(selPanel);if(!draw)return
-    saveHist(selPanel);const ctx=draw.getContext('2d')
-    const tmp=document.createElement('canvas');tmp.width=CW;tmp.height=CH;tmp.getContext('2d').drawImage(draw,0,0)
-    ctx.clearRect(0,0,CW,CH);ctx.save();applySelClip(ctx,selRef.current);ctx.drawImage(tmp,0,0);ctx.restore();comp();tick()
+    const {w:cw,h:ch}=cvRef.current
+    if(!selRef.current)return;const draw=getActiveCanvas();if(!draw)return
+    saveHist();const ctx=draw.getContext('2d')
+    const tmp=document.createElement('canvas');tmp.width=cw;tmp.height=ch;tmp.getContext('2d').drawImage(draw,0,0)
+    ctx.clearRect(0,0,cw,ch);ctx.save();applySelClip(ctx,selRef.current);ctx.drawImage(tmp,0,0);ctx.restore();comp();tick()
   }
   const fillSel=()=>{
-    if(!selRef.current||!selPanel)return;const{draw,comp}=getPR(selPanel);if(!draw)return
-    saveHist(selPanel);const ctx=draw.getContext('2d')
+    const {w:cw,h:ch}=cvRef.current
+    if(!selRef.current)return;const draw=getActiveCanvas();if(!draw)return
+    saveHist();const ctx=draw.getContext('2d')
     ctx.save();ctx.globalCompositeOperation='source-over';ctx.fillStyle=S.current.penColor
-    applySelClip(ctx,selRef.current);ctx.fillRect(0,0,CW,CH);ctx.restore();comp();tick()
+    applySelClip(ctx,selRef.current);ctx.fillRect(0,0,cw,ch);ctx.restore();comp();tick()
   }
   const startTransform=()=>{
-    if(!selRef.current||!selPanel)return;const{draw,comp}=getPR(selPanel);if(!draw)return
-    const r=selRef.current;const content=document.createElement('canvas');content.width=CW;content.height=CH
+    const {w:cw,h:ch}=cvRef.current
+    if(!selRef.current)return;const draw=getActiveCanvas();if(!draw)return
+    const r=selRef.current;const content=document.createElement('canvas');content.width=cw;content.height=ch
     content.getContext('2d').drawImage(draw,0,0)
-    saveHist(selPanel);const ctx=draw.getContext('2d');ctx.save();applySelClip(ctx,r);ctx.clearRect(0,0,CW,CH);ctx.restore()
-    setXfState({rect:{x:r.x,y:r.y,w:r.w,h:r.h},angle:0,content,panel:selPanel,origRect:{x:r.x,y:r.y,w:r.w,h:r.h},origSel:{...r}});comp()
+    saveHist();const ctx=draw.getContext('2d');ctx.save();applySelClip(ctx,r);ctx.clearRect(0,0,cw,ch);ctx.restore()
+    setXfState({rect:{x:r.x,y:r.y,w:r.w,h:r.h},angle:0,content,origRect:{x:r.x,y:r.y,w:r.w,h:r.h},origSel:{...r}});comp()
   }
-  const updateXf=useCallback(patch=>{setXfState(prev=>{const next={...prev,...patch};xfRef.current=next;setTimeout(()=>{if(next.panel==='left')lCompRef.current();else rCompRef.current()},0);return next})},[])
+  const updateXf=useCallback(patch=>{setXfState(prev=>{const next={...prev,...patch};xfRef.current=next;setTimeout(()=>compRef.current?.(),0);return next})},[])
   const commitXf=()=>{
-    if(!xfRef.current)return;const{rect,angle,content,panel}=xfRef.current;const{draw,comp}=getPR(panel)
+    const {w:cw,h:ch}=cvRef.current
+    if(!xfRef.current)return;const{rect,angle,content,origRect:or}=xfRef.current
+    const draw=getActiveCanvas()
     if(draw){
       const ctx=draw.getContext('2d'),mcx=rect.x+rect.w/2,mcy=rect.y+rect.h/2
-      const or=xfRef.current.origRect||rect,os=xfRef.current.origSel
+      const os=xfRef.current.origSel
       ctx.save();ctx.translate(mcx,mcy);ctx.rotate(angle)
       if(os?.pts&&or){
         const ocx=or.x+or.w/2,ocy=or.y+or.h/2,sx=or.w?rect.w/or.w:1,sy=or.h?rect.h/or.h:1
@@ -1447,29 +1409,32 @@ export default function App() {
       ctx.drawImage(content,(or||rect).x,(or||rect).y,(or||rect).w,(or||rect).h,-rect.w/2,-rect.h/2,rect.w,rect.h)
       ctx.restore()
     }
-    setXfState(null);setSel(null);setSelPanel(null);comp();tick()
+    setXfState(null);setSel(null);comp();tick()
   }
   const cancelXf=()=>{
-    if(!xfRef.current)return;const{origRect,content,panel}=xfRef.current;const{draw,comp}=getPR(panel)
+    if(!xfRef.current)return;const{origRect,content}=xfRef.current
+    const draw=S.current.activeLayerId===PHOTO_ID?photoLayerCanvas.current:layerCanvases.current[S.current.activeLayerId]
     if(draw)draw.getContext('2d').drawImage(content,origRect.x,origRect.y,origRect.w,origRect.h,origRect.x,origRect.y,origRect.w,origRect.h)
     setXfState(null);comp();tick()
   }
 
   // ── Undo / Redo ───────────────────────────────────────────────
-  const getHistCanvas=key=>key==='photo'?photoCanvas.current:key==='practiceDraw'?practiceOverlayRef.current:layerCanvases.current[+key]
+  const getCanvas=key=>key===PHOTO_ID?photoLayerCanvas.current:layerCanvases.current[+key]
   const doUndo=()=>{
     const key=lastHistKey.current||String(activeLayerId)
-    const _undoOne=k=>{const st=histStacks.current[k];if(!st)return;const p=histPtrs.current[k]??0;if(p<=0)return;histPtrs.current[k]=p-1;const c=getHistCanvas(k);if(c)c.getContext('2d').putImageData(st[p-1],0,0)}
-    _undoOne(key)
-    if(S.current.practiceMode){_undoOne(key==='practiceDraw'?String(S.current.activeLayerId):'practiceDraw')}
-    rightComposite();leftComposite();tick()
+    const st=histStacks.current[key];if(!st)return
+    const p=histPtrs.current[key]??0;if(p<=0)return
+    histPtrs.current[key]=p-1
+    const c=getCanvas(key);if(c)c.getContext('2d').putImageData(st[p-1],0,0)
+    comp();tick()
   }
   const doRedo=()=>{
     const key=lastHistKey.current||String(activeLayerId)
-    const _redoOne=k=>{const st=histStacks.current[k];if(!st)return;const p=histPtrs.current[k]??0;if(p>=st.length-1)return;histPtrs.current[k]=p+1;const c=getHistCanvas(k);if(c)c.getContext('2d').putImageData(st[p+1],0,0)}
-    _redoOne(key)
-    if(S.current.practiceMode){_redoOne(key==='practiceDraw'?String(S.current.activeLayerId):'practiceDraw')}
-    rightComposite();leftComposite();tick()
+    const st=histStacks.current[key];if(!st)return
+    const p=histPtrs.current[key]??0;if(p>=st.length-1)return
+    histPtrs.current[key]=p+1
+    const c=getCanvas(key);if(c)c.getContext('2d').putImageData(st[p+1],0,0)
+    comp();tick()
   }
   doUndoRef.current=doUndo;doRedoRef.current=doRedo
 
@@ -1525,7 +1490,12 @@ export default function App() {
         else setPenSize(v=>Math.max(1,v-1))
       }
     }
-    window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h)
+    const onShiftDn=e=>{if(e.key==='Shift'){shiftKeyRef.current=true;compRef.current?.()}}
+    const onShiftUp=e=>{if(e.key==='Shift'){shiftKeyRef.current=false;penSnapDirRef.current=null;penShiftSnapRef.current=null;compRef.current?.()}}
+    window.addEventListener('keydown',h)
+    window.addEventListener('keydown',onShiftDn)
+    window.addEventListener('keyup',onShiftUp)
+    return()=>{window.removeEventListener('keydown',h);window.removeEventListener('keydown',onShiftDn);window.removeEventListener('keyup',onShiftUp)}
   },[])
 
   // ── Tabmate WebHID ────────────────────────────────────────────
@@ -1590,6 +1560,20 @@ export default function App() {
   },[])
   const onFileInput=e=>{const file=e.target.files?.[0];if(file?.type.startsWith('image/'))setRefImage(URL.createObjectURL(file));e.target.value=''}
   const onRefDrop=useCallback(e=>{e.preventDefault();const file=e.dataTransfer.files[0];if(file?.type.startsWith('image/')){setRefImage(URL.createObjectURL(file));return};const text=e.dataTransfer.getData('text/plain')||e.dataTransfer.getData('text/uri-list');if(text){setUrlInput(text.trim());loadFromUrl(text.trim())}},[loadFromUrl])
+  // 写真読み込み済み時に左半分へのドラッグで写真を置き換え
+  const onCanvasDragOver=e=>{
+    if(!refImage||practiceMode){return}
+    const r=displayRef.current?.getBoundingClientRect();if(!r)return
+    if(e.clientX<r.left+r.width/2){e.preventDefault();setPhotoAreaDragOver(true)}
+    else setPhotoAreaDragOver(false)
+  }
+  const onCanvasDragLeave=()=>setPhotoAreaDragOver(false)
+  const onCanvasDrop=e=>{
+    setPhotoAreaDragOver(false)
+    if(!refImage||practiceMode)return
+    const r=displayRef.current?.getBoundingClientRect();if(!r)return
+    if(e.clientX<r.left+r.width/2)onRefDrop(e)
+  }
   const onUrlPaste=useCallback(e=>{const text=e.clipboardData.getData('text/plain');if(text&&(text.startsWith('http')||text.startsWith('data:'))){e.preventDefault();setUrlInput(text.trim());loadFromUrl(text.trim())}},[loadFromUrl])
   const URL_ERR={cors:'CORSエラー：このサイトは外部読み込みをブロックしています。\n画像を保存してドロップしてください。',notimg:'ページのURLではなく画像ファイルのURL（.jpg/.png等）を入力してください。',fail:'URLから画像を読み込めませんでした。'}
 
@@ -1620,21 +1604,21 @@ export default function App() {
   },[loadFromUrl])
 
   const deletePhoto=()=>{
-    setRefImage(null);setRefOverlay(false)
-    setCropMode(false);setCropRect(null);setAppliedCrop(null)
-    photoBakedRef.current=false
-    const ctx=photoCanvas.current?.getContext('2d');if(ctx)ctx.clearRect(0,0,CW,CH)
-    if(S.current.activeLayerId==='photo')setActiveLayerId(drawingLayers[drawingLayers.length-1]?.id??1)
-    // 描画パネルの全レイヤーをリセット
-    layers.forEach(l=>{
-      const c=layerCanvases.current[l.id];if(!c)return
-      const lctx=c.getContext('2d');lctx.clearRect(0,0,CW,CH)
-      if(l.isPaper){lctx.fillStyle='#ffffff';lctx.fillRect(0,0,CW,CH)}
-      const blank=lctx.getImageData(0,0,CW,CH)
-      histStacks.current[String(l.id)]=[blank];histPtrs.current[String(l.id)]=0
+    setRefImage(null);refImageEl.current=null
+    setAppliedCrop(null);setCropMode(false);setCropRect(null)
+    if(photoLayerCanvas.current){photoLayerCanvas.current.width=1;photoLayerCanvas.current=null}
+    delete histStacks.current[PHOTO_ID];delete histPtrs.current[PHOTO_ID]
+    if(activeLayerId===PHOTO_ID)setActiveLayerId(1)
+    const nw=DEFAULT_W,nh=DEFAULT_H
+    setCvW(nw);setCvH(nh);cvRef.current={w:nw,h:nh}
+    Object.entries(layerCanvases.current).forEach(([id,c])=>{
+      c.width=nw;c.height=nh
+      const ctx=c.getContext('2d');ctx.clearRect(0,0,nw,nh)
+      if(+id===PAPER_ID){ctx.fillStyle='#ffffff';ctx.fillRect(0,0,nw,nh)}
+      const blank=ctx.getImageData(0,0,nw,nh)
+      histStacks.current[String(id)]=[blank];histPtrs.current[String(id)]=0
     })
-    photoOverlayRef.current?.getContext('2d')?.clearRect(0,0,CW,CH)
-    lCompRef.current?.();rCompRef.current?.()
+    lastHistKey.current=null;setRev(r=>r+1)
   }
 
   // ── Layer ops ─────────────────────────────────────────────────
@@ -1653,15 +1637,23 @@ export default function App() {
     })
   },[activeLayerId])
   const updLayer=useCallback((id,patch)=>setLayers(p=>p.map(l=>l.id===id?{...l,...patch}:l)),[])
+  const resetAllLayers=useCallback(()=>{
+    if(!photoLayerCanvas.current||!histStacks.current[PHOTO_ID]?.[0])return
+    photoLayerCanvas.current.getContext('2d').putImageData(histStacks.current[PHOTO_ID][0],0,0)
+    histStacks.current[PHOTO_ID]=[histStacks.current[PHOTO_ID][0]];histPtrs.current[PHOTO_ID]=0
+    lastHistKey.current=null;comp()
+  },[comp])
   const clearActive=useCallback(()=>{
-    const lc=layerCanvases.current[activeLayerId];if(!lc)return
+    const {w:cw,h:ch}=cvRef.current
+    const lc=activeLayerId===PHOTO_ID?photoLayerCanvas.current:layerCanvases.current[activeLayerId];if(!lc)return
     const ctx=lc.getContext('2d'),isPaper=layers.find(l=>l.id===activeLayerId)?.isPaper
-    saveHist('right')
-    if(isPaper){ctx.fillStyle='#fff';ctx.fillRect(0,0,CW,CH)}else{ctx.clearRect(0,0,CW,CH)}
-    rightComposite();tick()
-  },[activeLayerId,layers,rightComposite,tick,saveHist])
+    saveHist()
+    if(isPaper){ctx.fillStyle='#fff';ctx.fillRect(0,0,cw,ch)}else{ctx.clearRect(0,0,cw,ch)}
+    comp();tick()
+  },[activeLayerId,layers,tick,saveHist,comp])
   const flatten=useCallback(()=>{
-    const m=document.createElement('canvas');m.width=CW;m.height=CH;const ctx=m.getContext('2d')
+    const {w:cw,h:ch}=cvRef.current
+    const m=document.createElement('canvas');m.width=cw;m.height=ch;const ctx=m.getContext('2d')
     layers.filter(l=>!l.isPaper).forEach(l=>{if(!l.visible)return;const lc=layerCanvases.current[l.id];if(!lc)return;ctx.globalAlpha=l.opacity/100;ctx.drawImage(lc,0,0)});ctx.globalAlpha=1
     const nid=layerCounter++;layerCanvases.current={[PAPER_ID]:layerCanvases.current[PAPER_ID],[nid]:m}
     setLayers([mkPaper(),mkLayer(nid,'結合')]);setActiveLayerId(nid)
@@ -1684,7 +1676,9 @@ export default function App() {
       if(Math.abs(dy)>4) layerDragRef.current.moved=true
       const listEl = layerListRef.current; if(!listEl) return
       const rows = [...listEl.querySelectorAll('.layer-row')]
-      const paperIdx = rows.length-1           // 用紙は常に最下段・移動不可
+      // 用紙行(paper-row)を基準にする。写真行は最下段で移動不可
+      const paperRow = listEl.querySelector('.paper-row')
+      const paperIdx = paperRow ? rows.indexOf(paperRow) : rows.length-1
       let di = paperIdx
       for(let i=0;i<paperIdx;i++){
         const r=rows[i].getBoundingClientRect()
@@ -1701,24 +1695,25 @@ export default function App() {
       // クリック（移動なし）→ 対象レイヤーをアクティブに
       if(!moved){
         const item=listItemsRef.current[srcIdx]
-        if(item?.type==='layer'&&!item.layer.isPaper) setActiveLayerId(item.layer.id)
-        else if(item?.type==='photo') setActiveLayerId('photo')
+        if(item?.type==='photo') setActiveLayerId(PHOTO_ID)
+        else if(item?.type==='layer'&&!item.layer.isPaper) setActiveLayerId(item.layer.id)
       }
-      // ドラッグ確定
+      // ドラッグ確定（写真行は対象外）
       if(moved && srcIdx!==null && di!==null && srcIdx!==di){
-        const items=[...listItemsRef.current]
-        const [moved2]=items.splice(srcIdx,1)
-        items.splice(di>srcIdx?di-1:di,0,moved2)
-        // listItems（上から下）→ 描画順（下から上）に変換
-        const newDrawing=[]; let newPhotoIdx=0
-        for(let i=items.length-1;i>=0;i--){
-          const it=items[i]
-          if(it.type==='photo') newPhotoIdx=newDrawing.length
-          else if(!it.layer.isPaper) newDrawing.push(it.layer)
+        const srcItem=listItemsRef.current[srcIdx]
+        if(srcItem?.type==='photo'){/* 写真行は並べ替え不可 */}else{
+          const items=[...listItemsRef.current]
+          const [moved2]=items.splice(srcIdx,1)
+          items.splice(di>srcIdx?di-1:di,0,moved2)
+          const newDrawing=[]
+          for(let i=items.length-1;i>=0;i--){
+            const it=items[i]
+            if(it.type==='photo') continue  // 写真行はスキップ
+            if(!it.layer.isPaper) newDrawing.push(it.layer)
+          }
+          setLayers(prev=>[prev.find(l=>l.isPaper),...newDrawing])
+          setTimeout(()=>compRef.current?.(),0)
         }
-        setLayers(prev=>[prev.find(l=>l.isPaper),...newDrawing])
-        setPhotoLayerIdx(newPhotoIdx)
-        setTimeout(()=>rCompRef.current?.(),0)
       }
       document.removeEventListener('mousemove',onMove)
       document.removeEventListener('mouseup',onEnd)
@@ -1730,31 +1725,127 @@ export default function App() {
     document.addEventListener('mouseup',onEnd)
     document.addEventListener('touchmove',onMove,{passive:false})
     document.addEventListener('touchend',onEnd)
-  },[setActiveLayerId,setLayers,setPhotoLayerIdx])
+  },[setActiveLayerId,setLayers])
+
+  // ── Crop helpers ──────────────────────────────────────────────
+  const startCrop=()=>{
+    const {w:cw,h:ch}=cvRef.current
+    setCropRect({x1:0,y1:0,x2:cw/2,y2:ch});setCropMode(true)
+  }
+  const cancelCrop=()=>{setCropMode(false);setCropRect(null)}
+  const applyCrop=()=>{
+    if(!cropRect||!refImageEl.current)return
+    const img=refImageEl.current
+    const {w:oldW,h:oldH}=cvRef.current
+    const {x1,y1,x2,y2}=cropRect
+    const cropW=x2-x1,cropH=y2-y1
+    if(cropW<10||cropH<10)return
+    const newW=cropW*2,newH=cropH
+    // source region in image natural coords (photo fills left half: 0,0 → oldW/2,oldH)
+    const sx=x1*img.naturalWidth/(oldW/2)
+    const sy=y1*img.naturalHeight/oldH
+    const sw=cropW*img.naturalWidth/(oldW/2)
+    const sh=cropH*img.naturalHeight/oldH
+    setCvW(newW);setCvH(newH);cvRef.current={w:newW,h:newH}
+    Object.entries(layerCanvases.current).forEach(([id,c])=>{
+      c.width=newW;c.height=newH
+      const ctx=c.getContext('2d')
+      if(+id===PAPER_ID){ctx.fillStyle='#fff';ctx.fillRect(0,0,newW,newH)}
+      const blank=ctx.getImageData(0,0,newW,newH)
+      histStacks.current[String(id)]=[blank];histPtrs.current[String(id)]=0
+    })
+    if(!photoLayerCanvas.current)photoLayerCanvas.current=document.createElement('canvas')
+    const plc=photoLayerCanvas.current;plc.width=newW;plc.height=newH
+    const pctx=plc.getContext('2d');pctx.clearRect(0,0,newW,newH)
+    pctx.drawImage(img,sx,sy,sw,sh,0,0,newW/2,newH)
+    histStacks.current[PHOTO_ID]=[pctx.getImageData(0,0,newW,newH)];histPtrs.current[PHOTO_ID]=0
+    setAppliedCrop({origW:oldW,origH:oldH})
+    setCropMode(false);setCropRect(null)
+    setRev(r=>r+1)
+  }
+  const resetCrop=()=>{
+    if(!appliedCrop||!refImageEl.current)return
+    const img=refImageEl.current
+    const {origW,origH}=appliedCrop
+    setCvW(origW);setCvH(origH);cvRef.current={w:origW,h:origH}
+    Object.entries(layerCanvases.current).forEach(([id,c])=>{
+      c.width=origW;c.height=origH
+      const ctx=c.getContext('2d')
+      if(+id===PAPER_ID){ctx.fillStyle='#fff';ctx.fillRect(0,0,origW,origH)}
+      const blank=ctx.getImageData(0,0,origW,origH)
+      histStacks.current[String(id)]=[blank];histPtrs.current[String(id)]=0
+    })
+    if(!photoLayerCanvas.current)photoLayerCanvas.current=document.createElement('canvas')
+    const plc=photoLayerCanvas.current;plc.width=origW;plc.height=origH
+    const pctx=plc.getContext('2d');pctx.clearRect(0,0,origW,origH)
+    pctx.drawImage(img,0,0,origW/2,origH)
+    histStacks.current[PHOTO_ID]=[pctx.getImageData(0,0,origW,origH)];histPtrs.current[PHOTO_ID]=0
+    setAppliedCrop(null)
+    setRev(r=>r+1)
+  }
+  const onCropHandleDown=(handle,initRect,e)=>{
+    e.preventDefault();e.stopPropagation()
+    const startX=e.clientX,startY=e.clientY
+    const {w:cw,h:ch}=cvRef.current
+    const r=displayRef.current?.getBoundingClientRect()
+    const scale=r?r.width/cw:1
+    const fw=cw/2,fh=ch,MIN=10
+    const onMove=ev=>{
+      const dx=(ev.clientX-startX)/scale,dy=(ev.clientY-startY)/scale
+      let {x1,y1,x2,y2}=initRect
+      if(handle==='tl'||handle==='l'||handle==='bl')x1=Math.min(initRect.x2-MIN,Math.max(0,initRect.x1+dx))
+      if(handle==='tr'||handle==='r'||handle==='br')x2=Math.max(initRect.x1+MIN,Math.min(fw,initRect.x2+dx))
+      if(handle==='tl'||handle==='t'||handle==='tr')y1=Math.min(initRect.y2-MIN,Math.max(0,initRect.y1+dy))
+      if(handle==='bl'||handle==='b'||handle==='br')y2=Math.max(initRect.y1+MIN,Math.min(fh,initRect.y2+dy))
+      if(handle==='c'){
+        const w=initRect.x2-initRect.x1,h=initRect.y2-initRect.y1
+        x1=Math.max(0,Math.min(fw-w,initRect.x1+dx));x2=x1+w
+        y1=Math.max(0,Math.min(fh-h,initRect.y1+dy));y2=y1+h
+      }
+      setCropRect({x1:Math.round(x1),y1:Math.round(y1),x2:Math.round(x2),y2:Math.round(y2)})
+    }
+    const onUp=()=>{document.removeEventListener('pointermove',onMove);document.removeEventListener('pointerup',onUp)}
+    document.addEventListener('pointermove',onMove);document.addEventListener('pointerup',onUp)
+  }
 
   // ── Derived ───────────────────────────────────────────────────
   const drawingLayers=layers.filter(l=>!l.isPaper)
   const paperLayer=layers.find(l=>l.isPaper)
   const activeLayer=layers.find(l=>l.id===activeLayerId)
-  const selCanvasEl=selPanel==='left'?photoDispRef.current:displayRef.current
-  const xfCanvasEl=xf?.panel==='left'?photoDispRef.current:displayRef.current
-  const cursor={[TOOLS.PEN]:'crosshair',[TOOLS.ERASER]:'cell',[TOOLS.MOVE]:'move',[TOOLS.SELECT]:'crosshair',[TOOLS.LINE]:'crosshair',[TOOLS.RULER]:'crosshair',[TOOLS.HAND]:panStartRef.current?'grabbing':'grab'}[activeTool]
+  const selCanvasEl=displayRef.current
+  const xfCanvasEl=displayRef.current
+  const cursor={[TOOLS.PEN]:'none',[TOOLS.ERASER]:'none',[TOOLS.MOVE]:'move',[TOOLS.SELECT]:'crosshair',[TOOLS.LINE]:'crosshair',[TOOLS.RULER]:'crosshair',[TOOLS.HAND]:panStartRef.current?'grabbing':'grab'}[activeTool]
 
   const buildListItems=()=>{
     const items=[],dlRev=[...drawingLayers].reverse()
-    const photoPos=drawingLayers.length-photoLayerIdx
-    dlRev.forEach((l,i)=>{if(i===photoPos)items.push({type:'photo'});items.push({type:'layer',layer:l})})
-    if(photoPos>=dlRev.length)items.push({type:'photo'})
+    dlRev.forEach(l=>items.push({type:'layer',layer:l}))
+    if(refImage)items.push({type:'photo'})
     if(paperLayer)items.push({type:'layer',layer:paperLayer})
     return items
   }
   const listItems=buildListItems()
   listItemsRef.current=listItems
 
+  const resizePracticeCanvas=useCallback((nw,nh)=>{
+    setCvW(nw);setCvH(nh);cvRef.current={w:nw,h:nh}
+    Object.entries(layerCanvases.current).forEach(([id,c])=>{
+      c.width=nw;c.height=nh
+      const ctx=c.getContext('2d')
+      if(+id===PAPER_ID){ctx.fillStyle='#fff';ctx.fillRect(0,0,nw,nh)}
+      const blank=ctx.getImageData(0,0,nw,nh)
+      histStacks.current[String(id)]=[blank];histPtrs.current[String(id)]=0
+    })
+    lastHistKey.current=null;setRev(r=>r+1)
+  },[])
   const startPractice=()=>{
+    setPracticeCategory('3d')
     const obj=genCompound();practiceObjRef.current=obj;setPracticeObject({...obj});setPracticeMode(true)
     const phi=.18+obj.ep*.52, theta=obj.rot*8+obj.skX*3
     setPracticeOrbit({rx:phi,ry:theta,rz:0,zoom:1})
+    // default canvas size for practice if still at initial default
+    if(cvRef.current.w===DEFAULT_W&&cvRef.current.h===DEFAULT_H){
+      resizePracticeCanvas(1200,600)
+    }
   }
 
   return (
@@ -1911,9 +2002,9 @@ export default function App() {
         </div>
       )}
 
-      <SelectionStrip sel={_selRect} canvasEl={selCanvasEl} onDeselect={deselect}
+      <SelectionStrip sel={_selRect} canvasEl={selCanvasEl} cvW={cvW} cvH={cvH} onDeselect={deselect}
         onDelete={deleteInSel} onDeleteOut={deleteOutSel} onFill={fillSel} onTransform={startTransform}/>
-      {xf&&<TransformOverlay xf={xf} canvasEl={xfCanvasEl} onUpdate={updateXf} onCommit={commitXf} onCancel={cancelXf}/>}
+      {xf&&<TransformOverlay xf={xf} canvasEl={xfCanvasEl} cvW={cvW} cvH={cvH} onUpdate={updateXf} onCommit={commitXf} onCancel={cancelXf}/>}
 
       <header className="toolbar">
         <button className="menu-btn" onClick={()=>setShowMenu(v=>!v)} title="メニュー"><MenuIcon/></button>
@@ -1943,6 +2034,8 @@ export default function App() {
             <div className="tool-sep"/>
             <button className="tool-btn" onClick={doUndo} title="取り消し (Ctrl+Z)"><UndoIcon/></button>
             <button className="tool-btn" onClick={doRedo} title="やり直し (Ctrl+Y)"><RedoIcon/></button>
+            <button className="tool-btn" onClick={clearActive} title="レイヤーをクリア"><ClearLayerIcon/></button>
+            <button className="tool-btn" onClick={resetAllLayers} title="参考画像を初期状態にリセット" style={{color:'#e07070'}}><ResetIcon/></button>
           </div>
           <div className="color-section">
             <input type="color" value={penColor} onChange={e=>setPenColor(e.target.value)} className="color-wheel" title="色選択"/>
@@ -1956,150 +2049,161 @@ export default function App() {
       <div className="main">
         <div className="content">
           <div className="draw-area" ref={drawAreaRef}>
-            <div style={{position:'absolute',inset:0,transform:(viewZoom!==100||panOffset.x||panOffset.y)?`translate(${panOffset.x}px,${panOffset.y}px) scale(${viewZoom/100})`:'none',transformOrigin:'center'}}>
-            <div className="panel-left"
-              style={leftHanded
-                ?{right:0,left:`${100-splitRatio}%`,width:`${splitRatio}%`}
-                :{left:0,width:`${splitRatio}%`}}
-              onDragOver={e=>e.preventDefault()} onDrop={onRefDrop}>
-              {practiceMode?(
-                <div style={{flex:1,position:'relative',overflow:'hidden'}}>
-                  <canvas ref={photoDispRef} width={CW} height={CH}
-                    style={{width:'100%',height:'100%',display:'block',cursor:'grab'}}
-                    {...orbitH}/>
-                  <canvas ref={practiceOverlayRef} width={CW} height={CH}
-                    style={{position:'absolute',inset:0,width:'100%',height:'100%',display:'block',
-                      cursor:practiceDrawMode?cursor:'default',
-                      pointerEvents:practiceDrawMode?'auto':'none'}}
-                    {...(practiceDrawMode?leftH:{})}/>
-                </div>
-              ):(
-                refImage&&!practiceMode&&fitDims?(
-                  <>
-                  <div style={{position:'absolute',right:0,top:'50%',transform:'translateY(-50%)',
-                               width:appliedCrop?appliedCrop.x2-appliedCrop.x1:fitDims.w,
-                               height:appliedCrop?appliedCrop.y2-appliedCrop.y1:fitDims.h,
-                               overflow:'hidden',flexShrink:0,boxShadow:'0 0 30px rgba(0,0,0,.4)'}}>
-                    <canvas ref={photoDispRef} width={CW} height={CH}
-                      style={{position:'absolute',
-                              left:-(fitDims.cw-fitDims.w)-(appliedCrop?.x1??0),
-                              top:-(fitDims.ch-fitDims.h)/2-(appliedCrop?.y1??0),
-                              width:fitDims.cw,height:fitDims.ch,display:'block'}}/>
-                    <canvas ref={photoOverlayRef} width={CW} height={CH}
-                      style={{position:'absolute',
-                              left:-(fitDims.cw-fitDims.w)-(appliedCrop?.x1??0),
-                              top:-(fitDims.ch-fitDims.h)/2-(appliedCrop?.y1??0),
-                              width:fitDims.cw,height:fitDims.ch,display:'block',cursor,touchAction:'none'}}
-                      {...leftH}/>
+            <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
+              <div style={{position:'relative',flexShrink:0,
+                width:dispSize.w||cvW,height:dispSize.h||cvH,
+                transform:(viewZoom!==100||panOffset.x||panOffset.y)?`translate(${panOffset.x}px,${panOffset.y}px) scale(${viewZoom/100})`:'none',
+                transformOrigin:'center'}}>
+                <canvas ref={displayRef} width={cvW} height={cvH}
+                  style={{width:'100%',height:'100%',display:'block',cursor,touchAction:'none'}}
+                  onPointerDown={onPointerDown}
+                  onPointerMove={onPointerMove}
+                  onPointerUp={onPointerUp}
+                  onPointerEnter={onPointerEnter}
+                  onPointerLeave={onPointerLeave}
+                  onDragOver={onCanvasDragOver}
+                  onDragLeave={onCanvasDragLeave}
+                  onDrop={onCanvasDrop}/>
+                {showRuler&&<RulerOverlay w={cvW} h={cvH} rulers={rulers} activeRulerId={activeRulerId}/>}
+                {cropMode&&cropRect&&(
+                  <div style={{position:'absolute',top:0,left:0,width:'50%',height:'100%',pointerEvents:'none',zIndex:8}}>
+                    <svg width="100%" height="100%" viewBox={`0 0 ${cvW/2} ${cvH}`}
+                      style={{position:'absolute',inset:0,overflow:'visible',pointerEvents:'auto'}}>
+                      <rect x={0} y={0} width={cvW/2} height={cropRect.y1} fill="rgba(0,0,0,.5)" style={{pointerEvents:'none'}}/>
+                      <rect x={0} y={cropRect.y2} width={cvW/2} height={cvH-cropRect.y2} fill="rgba(0,0,0,.5)" style={{pointerEvents:'none'}}/>
+                      <rect x={0} y={cropRect.y1} width={cropRect.x1} height={cropRect.y2-cropRect.y1} fill="rgba(0,0,0,.5)" style={{pointerEvents:'none'}}/>
+                      <rect x={cropRect.x2} y={cropRect.y1} width={cvW/2-cropRect.x2} height={cropRect.y2-cropRect.y1} fill="rgba(0,0,0,.5)" style={{pointerEvents:'none'}}/>
+                      <rect x={cropRect.x1} y={cropRect.y1} width={cropRect.x2-cropRect.x1} height={cropRect.y2-cropRect.y1}
+                        fill="none" stroke="#4a9eff" strokeWidth={3}
+                        style={{cursor:'move',pointerEvents:'auto',touchAction:'none'}}
+                        onPointerDown={e=>onCropHandleDown('c',{...cropRect},e)}/>
+                      {[['tl',cropRect.x1,cropRect.y1,'nwse-resize'],['tr',cropRect.x2,cropRect.y1,'nesw-resize'],
+                        ['bl',cropRect.x1,cropRect.y2,'nesw-resize'],['br',cropRect.x2,cropRect.y2,'nwse-resize'],
+                        ['t',(cropRect.x1+cropRect.x2)/2,cropRect.y1,'ns-resize'],
+                        ['b',(cropRect.x1+cropRect.x2)/2,cropRect.y2,'ns-resize'],
+                        ['l',cropRect.x1,(cropRect.y1+cropRect.y2)/2,'ew-resize'],
+                        ['r',cropRect.x2,(cropRect.y1+cropRect.y2)/2,'ew-resize'],
+                      ].map(([h,hx,hy,cur])=>(
+                        <rect key={h} x={hx-7} y={hy-7} width={14} height={14}
+                          fill="#4a9eff" stroke="white" strokeWidth={1.5} rx={2}
+                          style={{cursor:cur,pointerEvents:'auto',touchAction:'none'}}
+                          onPointerDown={e=>onCropHandleDown(h,{...cropRect},e)}/>
+                      ))}
+                    </svg>
                   </div>
-                  {cropMode&&cropRect&&(
-                    <div style={{position:'absolute',right:0,top:'50%',transform:'translateY(-50%)',
-                                 width:fitDims.w,height:fitDims.h,pointerEvents:'none',zIndex:10}}>
-                      <svg width={fitDims.w} height={fitDims.h} style={{position:'absolute',inset:0,overflow:'visible'}}>
-                        <rect x={0} y={0} width={fitDims.w} height={cropRect.y1} fill="rgba(0,0,0,.5)"/>
-                        <rect x={0} y={cropRect.y2} width={fitDims.w} height={fitDims.h-cropRect.y2} fill="rgba(0,0,0,.5)"/>
-                        <rect x={0} y={cropRect.y1} width={cropRect.x1} height={cropRect.y2-cropRect.y1} fill="rgba(0,0,0,.5)"/>
-                        <rect x={cropRect.x2} y={cropRect.y1} width={fitDims.w-cropRect.x2} height={cropRect.y2-cropRect.y1} fill="rgba(0,0,0,.5)"/>
-                        <rect x={cropRect.x1} y={cropRect.y1} width={cropRect.x2-cropRect.x1} height={cropRect.y2-cropRect.y1}
-                          fill="none" stroke="#4a9eff" strokeWidth={2}/>
-                        {[['tl',cropRect.x1,cropRect.y1,'nwse-resize'],
-                          ['tr',cropRect.x2,cropRect.y1,'nesw-resize'],
-                          ['bl',cropRect.x1,cropRect.y2,'nesw-resize'],
-                          ['br',cropRect.x2,cropRect.y2,'nwse-resize'],
-                          ['t',(cropRect.x1+cropRect.x2)/2,cropRect.y1,'ns-resize'],
-                          ['b',(cropRect.x1+cropRect.x2)/2,cropRect.y2,'ns-resize'],
-                          ['l',cropRect.x1,(cropRect.y1+cropRect.y2)/2,'ew-resize'],
-                          ['r',cropRect.x2,(cropRect.y1+cropRect.y2)/2,'ew-resize'],
-                        ].map(([h,hx,hy,cur])=>(
-                          <rect key={h} x={hx-7} y={hy-7} width={14} height={14}
-                            fill="#4a9eff" stroke="white" strokeWidth={1.5} rx={2}
-                            style={{cursor:cur,pointerEvents:'auto',touchAction:'none'}}
-                            onPointerDown={e=>onCropHandleDown(h,{...cropRect},e)}/>
-                        ))}
-                      </svg>
+                )}
+                {!practiceMode&&refImage&&photoAreaDragOver&&(
+                  <div style={{position:'absolute',top:0,left:0,width:'50%',height:'100%',
+                    pointerEvents:'none',zIndex:20,
+                    background:'rgba(74,158,255,0.13)',
+                    outline:'3px dashed #4a9eff',outlineOffset:'-3px',
+                    display:'flex',alignItems:'center',justifyContent:'center'}}>
+                    <div style={{textAlign:'center',color:'#4a9eff',fontWeight:700,fontSize:13,
+                      background:'rgba(255,255,255,0.85)',borderRadius:8,padding:'8px 16px'}}>
+                      <DropIcon/>
+                      <p style={{margin:'4px 0 0'}}>写真を置き換える</p>
                     </div>
-                  )}
-                  </>
-                ):(
-                  <canvas ref={photoDispRef} width={CW} height={CH} className="main-canvas"
-                    style={{cursor,display:refImage?'block':'none',
-                      position:'absolute',left:0,top:'50%',transform:'translateY(-50%)',maxWidth:'100%',maxHeight:'100%'}}
-                    {...leftH}/>
-                )
-              )}
-
-              {practiceMode&&(
-                <div className="practice-bar">
+                  </div>
+                )}
+                {!practiceMode&&!refImage&&(
+                  <div className="drop-zone"
+                    style={{position:'absolute',top:0,left:0,width:'50%',height:'100%'}}
+                    onDragOver={e=>e.preventDefault()} onDrop={onRefDrop}>
+                    <DropIcon/>
+                    <p>参考画像をドロップ / Ctrl+V で貼り付け</p>
+                    <p className="drop-sub">PNG · JPG · GIF · WebP · スクリーンショット可</p>
+                    <button className="file-pick-btn" onClick={()=>fileInputRef.current?.click()}>ファイルを選択</button>
+                    <input ref={fileInputRef} type="file" accept="image/*" style={{display:'none'}} onChange={onFileInput}/>
+                    <div className="url-row">
+                      <input type="text" className={`url-input${urlError?' url-error':''}`} placeholder="画像URLを貼り付け（.jpg/.png等）"
+                        value={urlInput} onChange={e=>{setUrlInput(e.target.value);setUrlError('')}}
+                        onPaste={onUrlPaste} onKeyDown={e=>e.key==='Enter'&&loadFromUrl(urlInput)}/>
+                      <button className="url-btn" onClick={()=>loadFromUrl(urlInput)}>→</button>
+                    </div>
+                    {urlError&&<div className="url-err-box">{URL_ERR[urlError].split('\n').map((l,i)=><p key={i}>{l}</p>)}</div>}
+                    <button className="practice-start-btn" onClick={startPractice}>🔷 幾何学練習モード</button>
+                  </div>
+                )}
+              </div>
+            </div>
+            {practiceMode&&dispSize.w>0&&(
+              <div className="practice-bar" style={{
+                position:'absolute',
+                left:`calc(50% - ${dispSize.w/2}px)`,
+                top:`calc(50% + ${dispSize.h/2}px)`,
+                bottom:'auto',
+                width:dispSize.w/2
+              }}>
+                {/* カテゴリ切替 */}
+                <button className={`pst-btn${practiceCategory==='3d'?' pst-active':''}`}
+                  onClick={()=>{if(practiceCategory==='3d')return;setPracticeCategory('3d');const o=genCompound();practiceObjRef.current=o;setPracticeObject({...o});const phi=.18+o.ep*.52,theta=o.rot*8+o.skX*3;setPracticeOrbit({rx:phi,ry:theta,rz:0,zoom:1})}}>立体</button>
+                <button className={`pst-btn${practiceCategory==='flat'?' pst-active':''}`}
+                  onClick={()=>{if(practiceCategory==='flat')return;setPracticeCategory('flat');const o=genFlat();practiceObjRef.current=o;setPracticeObject({...o});setPracticeDrawMode(true)}}>平面</button>
+                <div style={{width:1,background:'#444',margin:'0 4px',alignSelf:'stretch'}}/>
+                {/* 立体モード専用: 回転/描画 */}
+                {practiceCategory==='3d'&&<>
                   <button className={`pst-btn${!practiceDrawMode?' pst-active':''}`}
                     onClick={()=>setPracticeDrawMode(false)} title="回転・ズーム">↻ 回転</button>
                   <button className={`pst-btn${practiceDrawMode?' pst-active':''}`}
                     onClick={()=>setPracticeDrawMode(true)} title="上に描画">✎ 描画</button>
                   <div style={{width:1,background:'#444',margin:'0 4px',alignSelf:'stretch'}}/>
-                  <div className="practice-styles">
-                    {PSTYLES.map(s=>(
-                      <button key={s} className={`pst-btn${practiceStyle===s?' pst-active':''}`}
-                        onClick={()=>setPracticeStyle(s)}>{PLABELS[s]}</button>
-                    ))}
-                  </div>
-                  <button className="practice-shuffle" onClick={()=>{
-                    const o=genCompound();practiceObjRef.current=o;setPracticeObject({...o})
-                    const phi=.18+o.ep*.52, theta=o.rot*8+o.skX*3
-                    setPracticeOrbit({rx:phi,ry:theta,rz:0,zoom:1})
-                  }} title="形を変える"><ShuffleIcon/></button>
-                  <button className="practice-reset" onClick={()=>setPracticeOrbit({rx:.3,ry:.2,rz:0,zoom:1})} title="視点をリセット">⟳</button>
-                  <button className="practice-close" onClick={()=>{setPracticeMode(false);setPracticeDrawMode(false)}} title="練習モードを終了">✕</button>
+                </>}
+                {/* スタイル選択 */}
+                <div className="practice-styles">
+                  {(practiceCategory==='3d'?PSTYLES:FLAT_STYLES).map(s=>(
+                    <button key={s}
+                      className={`pst-btn${(practiceCategory==='3d'?practiceStyle:flatStyle)===s?' pst-active':''}`}
+                      onClick={()=>practiceCategory==='3d'?setPracticeStyle(s):setFlatStyle(s)}>
+                      {practiceCategory==='3d'?PLABELS[s]:FLAT_STYLE_LABELS[s]}
+                    </button>
+                  ))}
                 </div>
-              )}
-
-              {!practiceMode&&!refImage&&(
-                <div className="drop-zone">
-                  <DropIcon/>
-                  <p>参考画像をドロップ / Ctrl+V で貼り付け</p>
-                  <p className="drop-sub">PNG · JPG · GIF · WebP · スクリーンショット可</p>
-                  <button className="file-pick-btn" onClick={()=>fileInputRef.current?.click()}>ファイルを選択</button>
-                  <input ref={fileInputRef} type="file" accept="image/*" style={{display:'none'}} onChange={onFileInput}/>
-                  <div className="url-row">
-                    <input type="text" className={`url-input${urlError?' url-error':''}`} placeholder="画像URLを貼り付け（.jpg/.png等）"
-                      value={urlInput} onChange={e=>{setUrlInput(e.target.value);setUrlError('')}}
-                      onPaste={onUrlPaste} onKeyDown={e=>e.key==='Enter'&&loadFromUrl(urlInput)}/>
-                    <button className="url-btn" onClick={()=>loadFromUrl(urlInput)}>→</button>
-                  </div>
-                  {urlError&&<div className="url-err-box">{URL_ERR[urlError].split('\n').map((l,i)=><p key={i}>{l}</p>)}</div>}
-                  <button className="practice-start-btn" onClick={startPractice}>🔷 幾何学練習モード</button>
-                </div>
-              )}
-
-            </div>
-
-            <div className="panel-right"
-              style={leftHanded?{left:0,width:`${100-splitRatio}%`}:{left:`${splitRatio}%`,width:`${100-splitRatio}%`}}>
-              <div className={`canvas-area${refImage&&!practiceMode?' canvas-dual':''}`} ref={canvasAreaRef}>
-                {refImage&&!practiceMode&&fitDims?(
-                  <div style={{
-                    width:appliedCrop?appliedCrop.x2-appliedCrop.x1:fitDims.w,
-                    height:appliedCrop?appliedCrop.y2-appliedCrop.y1:fitDims.h,
-                    position:'relative',flexShrink:0,overflow:'hidden',
-                    marginTop:(fitDims.top??0)+(appliedCrop?.y1??0),
-                    boxShadow:'0 0 30px rgba(0,0,0,.4)'}}>
-                    <div style={{position:'absolute',
-                      top:-(fitDims.ch-fitDims.h)/2-(appliedCrop?.y1??0),
-                      left:-(fitDims.cw-fitDims.w)-(appliedCrop?.x1??0),
-                      width:fitDims.cw,height:fitDims.ch}}>
-                      <canvas ref={displayRef} width={CW} height={CH}
-                        style={{width:'100%',height:'100%',display:'block',cursor,touchAction:'none'}}
-                        {...rightH}/>
-                      {showRuler&&<RulerOverlay w={CW} h={CH} rulers={rulers} activeRulerId={activeRulerId}/>}
-                    </div>
-                  </div>
-                ):(
-                  <>
-                    <canvas ref={displayRef} width={CW} height={CH} className="main-canvas" style={{cursor}} {...rightH}/>
-                    {showRuler&&<RulerOverlay w={CW} h={CH} rulers={rulers} activeRulerId={activeRulerId}/>}
-                  </>
-                )}
+                <div style={{width:1,background:'#444',margin:'0 4px',alignSelf:'stretch'}}/>
+                {[['小',800,400],['中',1200,600],['大',1800,900]].map(([label,w,h])=>(
+                  <button key={label} className={`pst-btn${cvW===w&&cvH===h?' pst-active':''}`}
+                    onClick={()=>resizePracticeCanvas(w*2,h)} title={`${w}×${h}`}>{label}</button>
+                ))}
+                {practiceCategory==='3d'&&<button className="practice-reset" onClick={()=>setPracticeOrbit({rx:.3,ry:.2,rz:0,zoom:1})} title="視点をリセット">⟳</button>}
+                <button className="practice-close" onClick={()=>{setPracticeMode(false);setPracticeDrawMode(false)}} title="練習モードを終了">✕</button>
               </div>
-            </div>
-            </div>
+            )}
+            {/* 描画パネル下サブバー: 重ねて表示 + 形を変える */}
+            {dispSize.w>0&&(refImage||practiceMode)&&(
+              <div className="practice-bar" style={{
+                position:'absolute',
+                left:`calc(50%)`,
+                top:`calc(50% + ${dispSize.h/2}px)`,
+                bottom:'auto',
+                width:dispSize.w/2,
+                justifyContent:'flex-end'
+              }}>
+                {/* 不透明度スライダー（ボタンの左に、ONのとき表示） */}
+                {(practiceMode?practiceOverlay:refOverlay)&&<>
+                  <input type="range" min="0" max="100"
+                    value={practiceMode?practiceOverlayOpacity:refOverlayOpacity}
+                    onChange={e=>practiceMode?setPracticeOverlayOpacity(+e.target.value):setRefOverlayOpacity(+e.target.value)}
+                    className="split-slider" style={{width:72}}/>
+                  <span style={{color:'#aaa',fontSize:11,flexShrink:0,minWidth:26}}>
+                    {practiceMode?practiceOverlayOpacity:refOverlayOpacity}%
+                  </span>
+                </>}
+                {/* 重ねて表示ボタン（常に右端近くで位置固定） */}
+                <button
+                  className={`pst-btn${(practiceMode?practiceOverlay:refOverlay)?' pst-active':''}`}
+                  onClick={()=>practiceMode?setPracticeOverlay(v=>!v):setRefOverlay(v=>!v)}
+                  title="描画パネルに重ねて表示"><OverlayIcon/></button>
+                {/* 形を変える（練習モードのみ） */}
+                {practiceMode&&<button className="practice-shuffle" onClick={()=>{
+                  if(practiceCategory==='3d'){
+                    const o=genCompound();practiceObjRef.current=o;setPracticeObject({...o})
+                    const phi=.18+o.ep*.52,theta=o.rot*8+o.skX*3
+                    setPracticeOrbit({rx:phi,ry:theta,rz:0,zoom:1})
+                  } else {
+                    const o=genFlat();practiceObjRef.current=o;setPracticeObject({...o})
+                  }
+                }} title="形を変える"><ShuffleIcon/></button>}
+              </div>
+            )}
           </div>
 
           <div className="bottom-bar">
@@ -2114,21 +2218,25 @@ export default function App() {
             <span className="bb-val">{viewZoom}%</span>
             {(viewZoom!==100||panOffset.x||panOffset.y)&&<button className="bb-reset-btn" onClick={()=>{setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}} title="表示位置・ズームをリセット">⟳</button>}
             <div style={{flex:1}}/>
-            {refImage&&!practiceMode&&<button className={`sl-btn${refOverlay?' sl-active':''}`} onClick={()=>setRefOverlay(v=>!v)} title="参考画像を描画パネルに重ねて表示"><span className="sl-icon ci"/></button>}
-            {refImage&&!practiceMode&&refOverlay&&<>
-              <label className="bb-label">重ねて表示</label>
-              <input type="range" min="0" max="100" value={refOverlayOpacity} onChange={e=>setRefOverlayOpacity(+e.target.value)} className="split-slider"/>
-              <span className="bb-val">{refOverlayOpacity}%</span>
+            {(refImage||practiceMode)&&(practiceMode?practiceOverlay:refOverlay)&&<>
+              <input type="range" min="0" max="100"
+                value={practiceMode?practiceOverlayOpacity:refOverlayOpacity}
+                onChange={e=>practiceMode?setPracticeOverlayOpacity(+e.target.value):setRefOverlayOpacity(+e.target.value)}
+                className="split-slider" style={{width:72}}/>
+              <span style={{color:'#aaa',fontSize:11,flexShrink:0,minWidth:26}}>
+                {practiceMode?practiceOverlayOpacity:refOverlayOpacity}%
+              </span>
             </>}
+            {(refImage||practiceMode)&&<button className={`bb-crop-btn${(practiceMode?practiceOverlay:refOverlay)?' bb-crop-reset':''}`} onClick={()=>practiceMode?setPracticeOverlay(v=>!v):setRefOverlay(v=>!v)} title="描画パネルに重ねて表示"><OverlayIcon/></button>}
             {refImage&&!practiceMode&&(appliedCrop?(
-              <button className="bb-crop-btn bb-crop-reset" onClick={()=>setAppliedCrop(null)} title="切り取りを解除">切り取り解除</button>
+              <button className="bb-crop-btn bb-crop-reset" onClick={resetCrop} title="切り取りを解除">切り取り解除</button>
             ):cropMode?(
               <>
-                <button className="bb-crop-btn bb-crop-apply" onClick={()=>{setAppliedCrop({...cropRect});setCropMode(false)}} title="切り取りを適用">適用</button>
-                <button className="bb-crop-btn bb-crop-cancel" onClick={()=>{setCropMode(false);setCropRect(null)}} title="キャンセル">キャンセル</button>
+                <button className="bb-crop-btn bb-crop-apply" onClick={applyCrop} title="切り取りを適用">適用</button>
+                <button className="bb-crop-btn bb-crop-cancel" onClick={cancelCrop} title="キャンセル">キャンセル</button>
               </>
             ):(
-              <button className="bb-crop-btn" onClick={()=>{if(fitDims){setCropRect({x1:0,y1:0,x2:fitDims.w,y2:fitDims.h});setCropMode(true)}}} title="切り取り">切り取り</button>
+              <button className="bb-crop-btn" onClick={startCrop} title="切り取り">切り取り</button>
             ))}
             {refImage&&!practiceMode&&<button onClick={deletePhoto} className="bb-del-btn" title="写真を削除">✕ 削除</button>}
           </div>
@@ -2143,9 +2251,11 @@ export default function App() {
                 <div className="pen-sidebar-body tool-body">
                   <div className="tool-size-row">
                     <span className="tool-label">太さ</span>
-                    <input type="range" min="1" max="80" value={penSize}
+                    <input type="range" min="1" max="100" value={penSize}
                       onChange={e=>setPenSize(+e.target.value)} className="tool-slider"/>
-                    <span className="tool-size-val">{penSize}</span>
+                    <input type="number" min="1" max="100" value={penSize}
+                      onChange={e=>{const v=Math.max(1,Math.min(100,+e.target.value||1));setPenSize(v)}}
+                      className="tool-size-input"/>
                   </div>
                 </div>
               </>}
@@ -2156,26 +2266,38 @@ export default function App() {
                     <span className="tool-label">太さ</span>
                     <input type="range" min="1" max="80" value={eraserSize}
                       onChange={e=>setEraserSize(+e.target.value)} className="tool-slider"/>
-                    <span className="tool-size-val">{eraserSize}</span>
+                    <input type="number" min="1" max="999" value={eraserSize}
+                      onChange={e=>{const v=Math.max(1,Math.min(999,+e.target.value||1));setEraserSize(v)}}
+                      className="tool-size-input"/>
                   </div>
                 </div>
               </>}
               {showGrid&&!hardMode&&<>
                 <div className="pen-sidebar-hdr">マス目</div>
                 <div className="pen-sidebar-body">
-                  <div className="pen-size-row">
-                    <span className="tool-label">{gridSize<0?`${-gridSize}分割`:'サイズ'}</span>
-                    <select value={gridSize} onChange={e=>setGridSize(+e.target.value)} className="sel-sm">
-                      <optgroup label="サイズ">
-                        {[80,100,150,200,300,400,500].map(s=><option key={s} value={s}>{s}px</option>)}
-                      </optgroup>
-                      <optgroup label="分割">
-                        <option value={-2}>縦横2分割</option>
-                        <option value={-3}>縦横3分割</option>
-                        <option value={-4}>縦横4分割</option>
-                      </optgroup>
-                    </select>
+                  <div className="pen-size-row" style={{gap:4,marginBottom:4}}>
+                    <button className={`grid-mode-btn${gridSize>0?' gm-active':''}`} onClick={()=>{if(gridSize<0)setGridSize(100)}}>サイズ</button>
+                    <button className={`grid-mode-btn${gridSize<0?' gm-active':''}`} onClick={()=>{if(gridSize>0)setGridSize(-4)}}>分割</button>
                   </div>
+                  {gridSize>0?(
+                    <div className="tool-size-row">
+                      <span className="tool-label">px</span>
+                      <input type="range" min="20" max="500" value={gridSize}
+                        onChange={e=>setGridSize(+e.target.value)} className="tool-slider"/>
+                      <input type="number" min="1" max="2000" value={gridSize}
+                        onChange={e=>{const v=Math.max(1,+e.target.value||1);setGridSize(v)}}
+                        className="tool-size-input"/>
+                    </div>
+                  ):(
+                    <div className="tool-size-row">
+                      <span className="tool-label">分割</span>
+                      <input type="range" min="2" max="20" value={-gridSize}
+                        onChange={e=>setGridSize(-e.target.value)} className="tool-slider"/>
+                      <input type="number" min="1" max="32" value={-gridSize}
+                        onChange={e=>{const v=Math.max(1,Math.min(32,+e.target.value||1));setGridSize(-v)}}
+                        className="tool-size-input"/>
+                    </div>
+                  )}
                   <div className="tool-size-row" style={{marginTop:6}}>
                     <span className="tool-label">濃度</span>
                     <input type="range" min="10" max="100" value={gridOpacity}
@@ -2220,11 +2342,17 @@ export default function App() {
                         <option value="cm">cm メモリ</option>
                         <option value="div">等分割</option>
                       </select>
-                      <div className="tool-size-row" style={{marginBottom:5}}>
+                      <div className="tool-size-row" style={{marginBottom:5,flexWrap:'wrap',gap:4}}>
                         <span className="tool-label">色</span>
-                        <input type="color" value={ar.color}
-                          onChange={e=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,color:e.target.value}:r))}
-                          style={{width:36,height:24,padding:2,border:'1px solid #555',borderRadius:3,cursor:'pointer',background:'none'}}/>
+                        <div style={{display:'flex',gap:3,alignItems:'center',flexWrap:'wrap'}}>
+                          {PRESET_COLORS.map(c=>(
+                            <button key={c} className={`swatch${ar.color===c?' sel':''}`}
+                              style={{background:c,width:18,height:18}}
+                              onClick={()=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,color:c}:r))}/>
+                          ))}
+                          <ToggleColorPicker value={ar.color}
+                            onChange={c=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,color:c}:r))}/>
+                        </div>
                       </div>
                       {ar.type==='div'&&<div className="tool-size-row">
                         <span className="tool-label">分割数</span>
@@ -2237,6 +2365,17 @@ export default function App() {
                     {/* デフォルト（次の定規用）*/}
                     {activeTool===TOOLS.RULER&&<div className="ruler-default-section">
                       <div className="ruler-settings-title">次の定規</div>
+                      <div className="tool-size-row" style={{marginBottom:5,flexWrap:'wrap',gap:4}}>
+                        <span className="tool-label">色</span>
+                        <div style={{display:'flex',gap:3,alignItems:'center',flexWrap:'wrap'}}>
+                          {PRESET_COLORS.map(c=>(
+                            <button key={c} className={`swatch${rulerColor===c?' sel':''}`}
+                              style={{background:c,width:18,height:18}}
+                              onClick={()=>setRulerColor(c)}/>
+                          ))}
+                          <ToggleColorPicker value={rulerColor} onChange={setRulerColor}/>
+                        </div>
+                      </div>
                       <select value={rulerType} onChange={e=>setRulerType(e.target.value)}
                         className="sel-sm" style={{width:'100%',marginBottom:5}}>
                         <option value="none">メモリなし</option>
@@ -2263,11 +2402,11 @@ export default function App() {
                 <div className="lp-actions">
                   <button onClick={addLayer} title="新規">+</button>
                   <button onClick={deleteLayer} disabled={drawingLayers.length<=1} title="削除">−</button>
-                  <button onClick={clearActive} title="クリア" className="btn-warn">🗑</button>
+                  <button onClick={clearActive} title="クリア" className="btn-warn"><ClearLayerIcon/></button>
                   <button onClick={flatten} title="統合" className="btn-merge">⊕</button>
                 </div>
               </div>
-              {activeLayerId==='photo'&&(
+              {activeLayerId===PHOTO_ID&&(
                 <div className="lp-opacity">
                   <label>不透明度<span>{refOpacity}%</span></label>
                   <input type="range" min="0" max="100" value={refOpacity} onChange={e=>setRefOpacity(+e.target.value)}/>
@@ -2285,11 +2424,11 @@ export default function App() {
                   const isDrop = layerDropIdx===idx && layerDragSrc!==null && layerDropIdx!==layerDragSrc
                   if(item.type==='photo')return(
                     <div key="photo"
-                      className={`layer-row photo-layer-row${isDrag?' layer-dragging':''}${isDrop?' layer-drop-here':''}${activeLayerId==='photo'?' active':''}`}
+                      className={`layer-row photo-layer-row${isDrag?' layer-dragging':''}${isDrop?' layer-drop-here':''}${activeLayerId===PHOTO_ID?' active':''}`}
                       onMouseDown={e=>onLayerPointerDown(idx,e)}
                       onTouchStart={e=>onLayerPointerDown(idx,e)}>
                       <span className="vis-btn"><EyeIcon/></span>
-                      <div className="layer-thumb-ref">{refImage?<img src={refImage} alt="" style={{opacity:refOpacity/100}}/>:<span style={{fontSize:9,color:'#888',padding:'0 4px'}}>なし</span>}</div>
+                      <div className="layer-thumb-ref"><img src={refImage} alt="" style={{opacity:refOpacity/100}}/></div>
                       <span className="layer-name">参考画像</span>
                     </div>
                   )
@@ -2313,8 +2452,83 @@ export default function App() {
           </div>
         )}
       </div>
+      {/* custom cursor */}
+      {(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER)&&isCursorOnCanvas&&(
+        <div ref={cursorDivRef} style={{
+          position:'fixed',left:0,top:0,
+          width:20,height:20,
+          transform:'translate(-50%,-50%)',
+          borderRadius:'50%',
+          border:'1px solid rgba(0,0,0,0.85)',
+          boxShadow:'0 0 0 0.75px rgba(255,255,255,0.7)',
+          pointerEvents:'none',zIndex:9999
+        }}>
+          <div className="cur-cross" style={{position:'absolute',inset:0,opacity:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="black" strokeWidth="1">
+              <line x1="4" y1="0" x2="4" y2="8"/><line x1="0" y1="4" x2="8" y2="4"/>
+            </svg>
+          </div>
+        </div>
+      )}
     </div>
   )
+}
+
+// ── Flat 2D practice shapes ────────────────────────────────────────
+function _ngon(ctx,cx,cy,r,n,a0=-Math.PI/2){
+  for(let i=0;i<=n;i++){const a=a0+(i/n)*Math.PI*2;i===0?ctx.moveTo(cx+r*Math.cos(a),cy+r*Math.sin(a)):ctx.lineTo(cx+r*Math.cos(a),cy+r*Math.sin(a))}
+}
+function drawFlatPractice(ctx,obj,areaW,areaH,style,x0=0,y0=0){
+  if(!obj)return
+  const{type='circle',rot=0,aspect=.65}=obj
+  const sc=Math.min(areaW,areaH)*.34
+  const cx=x0+areaW/2,cy=y0+areaH/2
+  ctx.save()
+  ctx.translate(cx,cy);ctx.rotate(rot);ctx.translate(-cx,-cy)
+  // center guide lines: + and × (not for diamond — its axes overlap the shape)
+  if(type!=='diamond'){
+    const gl=sc*1.8,gd=gl*Math.SQRT1_2
+    ctx.save();ctx.strokeStyle='rgba(140,140,180,.22)';ctx.lineWidth=.8;ctx.setLineDash([3,6])
+    ctx.beginPath()
+    ctx.moveTo(cx-gl,cy);ctx.lineTo(cx+gl,cy)
+    ctx.moveTo(cx,cy-gl);ctx.lineTo(cx,cy+gl)
+    ctx.moveTo(cx-gd,cy-gd);ctx.lineTo(cx+gd,cy+gd)
+    ctx.moveTo(cx+gd,cy-gd);ctx.lineTo(cx-gd,cy+gd)
+    ctx.stroke();ctx.restore()
+  }
+  // shape path
+  ctx.beginPath()
+  switch(type){
+    case 'circle': ctx.arc(cx,cy,sc,0,Math.PI*2);break
+    case 'ellipse': ctx.ellipse(cx,cy,sc,sc*Math.max(.38,aspect*.72),0,0,Math.PI*2);break
+    case 'triangle': _ngon(ctx,cx,cy,sc,3,-Math.PI/2);break
+    case 'rtriangle':{const h=sc*Math.max(.5,aspect*1.2);ctx.moveTo(cx-sc,cy+h*.5);ctx.lineTo(cx+sc,cy+h*.5);ctx.lineTo(cx-sc,cy-h*.5);ctx.closePath();break}
+    case 'square': ctx.rect(cx-sc,cy-sc,sc*2,sc*2);break
+    case 'rect':{const rh=sc*Math.max(.42,aspect*.82);ctx.rect(cx-sc,cy-rh,sc*2,rh*2);break}
+    case 'pentagon': _ngon(ctx,cx,cy,sc,5,-Math.PI/2);break
+    case 'hexagon': _ngon(ctx,cx,cy,sc,6,0);break
+    case 'star':{const ir=sc*.4;for(let i=0;i<=10;i++){const a=-Math.PI/2+(i/10)*Math.PI*2,r=i%2===0?sc:ir;i===0?ctx.moveTo(cx+r*Math.cos(a),cy+r*Math.sin(a)):ctx.lineTo(cx+r*Math.cos(a),cy+r*Math.sin(a))};ctx.closePath();break}
+    case 'diamond': _ngon(ctx,cx,cy,sc,4,0);break
+    case 'trapezoid':{const tw=sc*.52,bw=sc*.92,h=sc*Math.max(.45,aspect*.72);ctx.moveTo(cx-tw,cy-h);ctx.lineTo(cx+tw,cy-h);ctx.lineTo(cx+bw,cy+h);ctx.lineTo(cx-bw,cy+h);ctx.closePath();break}
+    case 'parallelogram':{const pw=sc,ph=sc*Math.max(.38,aspect*.6),off=sc*.3;ctx.moveTo(cx-pw+off,cy-ph);ctx.lineTo(cx+pw+off,cy-ph);ctx.lineTo(cx+pw-off,cy+ph);ctx.lineTo(cx-pw-off,cy+ph);ctx.closePath();break}
+  }
+  const isFill=style!=='outline'
+  if(isFill){
+    const g=ctx.createLinearGradient(cx-sc,cy-sc,cx+sc,cy+sc)
+    g.addColorStop(0,'#f5f1ed');g.addColorStop(.55,'#e6e2dc');g.addColorStop(1,'#cdc9c3')
+    ctx.fillStyle=g;ctx.fill()
+  }
+  ctx.shadowColor='rgba(50,40,30,.18)';ctx.shadowBlur=isFill?18:0;ctx.shadowOffsetX=sc*.05;ctx.shadowOffsetY=sc*.07
+  ctx.strokeStyle='#4a4540';ctx.lineWidth=2.2;ctx.stroke()
+  ctx.shadowColor='transparent'
+  // center dot
+  ctx.beginPath();ctx.arc(cx,cy,2.5,0,Math.PI*2);ctx.fillStyle='rgba(100,90,80,.38)';ctx.fill()
+  ctx.restore()
+  // shape name label — drawn outside rotation transform, using absolute coordinates
+  ctx.save()
+  ctx.font='bold 13px sans-serif';ctx.textAlign='center';ctx.fillStyle='rgba(80,70,60,.45)'
+  ctx.fillText(FLAT_LABELS[type]||type,x0+areaW/2,y0+areaH*.88)
+  ctx.restore()
 }
 
 // ── Three.js helpers ──────────────────────────────────────────────
@@ -2327,6 +2541,7 @@ function buildThreeObj(type, mat, style){
   const grp = new THREE.Group()
   const isWire = style==='wireframe'
   const edgeMat = new THREE.LineBasicMaterial({color:0x1a1816})
+  const flatMat = !isWire ? new THREE.MeshStandardMaterial({color:0xede9e3,roughness:.62,metalness:0,flatShading:true}) : mat
   const add = (geo, m, pos, rotArr) => {
     const mesh = new THREE.Mesh(geo, m||mat)
     if(pos) mesh.position.set(...pos)
@@ -2352,8 +2567,8 @@ function buildThreeObj(type, mat, style){
     case 'tetrahedron': add(new THREE.TetrahedronGeometry(1.52,0)); break
     case 'icosahedron': add(new THREE.IcosahedronGeometry(1.25,0)); break
     case 'dodecahedron':add(new THREE.DodecahedronGeometry(1.12,0)); break
-    case 'prism':       add(new THREE.CylinderGeometry(.95,.95,1.85,3)); break
-    case 'pyramid':     add(new THREE.ConeGeometry(1.1,1.9,4)); break
+    case 'prism':       add(new THREE.CylinderGeometry(.95,.95,1.85,3),flatMat); break
+    case 'pyramid':     add(new THREE.ConeGeometry(1.1,1.9,4),flatMat); break
     case 'capsule':     add(new THREE.CapsuleGeometry(.7,1.2,12,32)); break
     case 'torusknot':   add(new THREE.TorusKnotGeometry(.62,.20,120,16)); break
     case 'gem':
@@ -2364,10 +2579,18 @@ function buildThreeObj(type, mat, style){
       add(new THREE.CylinderGeometry(.22,.22,1.55,16),null,[0,-.38])
       add(new THREE.ConeGeometry(.54,.92,16),null,[0,.70])
       break
-    case 'mushroom':
-      add(new THREE.SphereGeometry(1.12,48,32,0,Math.PI*2,0,Math.PI*.62),null,[0,.26])
+    case 'mushroom': {
+      const capR=1.12,capTheta=Math.PI*.62
+      const openY=0.26+capR*Math.cos(capTheta)   // ≈ -0.150 (global y of opening)
+      const openR=capR*Math.sin(capTheta)          // ≈ 1.042 (radius of opening)
+      add(new THREE.SphereGeometry(capR,48,32,0,Math.PI*2,0,capTheta),null,[0,.26])
+      if(!isWire)
+        add(new THREE.CircleGeometry(openR,48),
+            new THREE.MeshStandardMaterial({color:0xede9e3,roughness:.62,metalness:0,side:THREE.DoubleSide}),
+            [0,openY,0],[Math.PI/2,0,0])
       add(new THREE.CylinderGeometry(.28,.44,1.22,32),null,[0,-.64])
       break
+    }
     case 'rocket':
       add(new THREE.CylinderGeometry(.38,.38,1.8,32))
       add(new THREE.ConeGeometry(.38,.85,32),null,[0,1.32])
@@ -2389,8 +2612,8 @@ function buildThreeObj(type, mat, style){
       add(new THREE.CircleGeometry(.82,32),null,[0,.11],[Math.PI/2,0,0])
       break
     case 'crystal':
-      add(new THREE.CylinderGeometry(.40,.50,1.52,6),null,[0,-.16])
-      add(new THREE.ConeGeometry(.40,.68,6),null,[0,.92])
+      add(new THREE.CylinderGeometry(.40,.50,1.52,6),flatMat,[0,-.16])
+      add(new THREE.ConeGeometry(.40,.68,6),flatMat,[0,.92])
       break
     case 'hourglass':{
       const hg=isWire?mat:new THREE.MeshStandardMaterial({color:0xdce8f4,roughness:.1,metalness:.05,transparent:true,opacity:.55})
@@ -2417,10 +2640,12 @@ function drawSelPath(ctx,sel){
 function TB({label,active,onClick,children}){return <button className={`tool-btn${active?' active':''}`} onClick={onClick} title={label}>{children}</button>}
 function MenuIcon(){return<svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="2" y1="5" x2="18" y2="5"/><line x1="2" y1="10" x2="18" y2="10"/><line x1="2" y1="15" x2="18" y2="15"/></svg>}
 function UndoIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 00-4-4H4"/></svg>}
+function ClearLayerIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>}
+function ResetIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>}
 function RedoIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 014-4h12"/></svg>}
 function PenIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>}
-function EraserIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="2" y="8" width="20" height="10" rx="2" fill="#fafaf8" stroke="#666" strokeWidth="1.5"/><rect x="2" y="8" width="9" height="10" rx="2" fill="#f0a0a0" stroke="#666" strokeWidth="1.5"/><line x1="11" y1="8" x2="11" y2="18" stroke="#888" strokeWidth="1.3"/><line x1="3" y1="18" x2="21" y2="18" stroke="#444" strokeWidth="2.2" strokeLinecap="round"/></svg>}
-function SelectIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="2" y="2" width="13" height="12" rx=".5" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 2" fill="none"/><path d="M15 15 L15 23 L17.2 20.2 L19.4 23.4 L20.5 22.6 L18.3 19.4 L21.2 19.4 Z" fill="currentColor"/></svg>}
+function EraserIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21H7z"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>}
+function SelectIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" strokeDasharray="4 2.5"/></svg>}
 function MoveIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M12 12v-7M12 12H5M12 12v7M12 12h7"/></svg>}
 function LineIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="20" x2="20" y2="4"/><circle cx="4" cy="20" r="2" fill="currentColor" stroke="none"/><circle cx="20" cy="4" r="2" fill="currentColor" stroke="none"/></svg>}
 function RulerIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="8" width="20" height="8" rx="1"/><line x1="6" y1="8" x2="6" y2="13"/><line x1="10" y1="8" x2="10" y2="11"/><line x1="14" y1="8" x2="14" y2="11"/><line x1="18" y1="8" x2="18" y2="13"/></svg>}
@@ -2428,7 +2653,8 @@ function GridIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="
 function SnapIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3" fill="currentColor" fillOpacity=".3"/><path d="M7 7l2.5 2.5M14.5 14.5L17 17M17 7l-2.5 2.5M9.5 14.5L7 17"/></svg>}
 function ShuffleIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>}
 function DropIcon(){return<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" opacity=".4"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>}
-function HandIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 11V7a2 2 0 00-4 0v4"/><path d="M14 9V5a2 2 0 00-4 0v4"/><path d="M10 9V4a2 2 0 00-4 0v4"/><path d="M6 12v-1a2 2 0 014 0v1"/><path d="M18 11a2 2 0 014 0v3a8 8 0 01-8 8H10a8 8 0 01-8-8v-5a2 2 0 014 0v4"/></svg>}
+function HandIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M18 11V8a2 2 0 00-4 0v3"/><path d="M14 10.5V6a2 2 0 00-4 0v4.5"/><path d="M10 10V5a2 2 0 00-4 0v9"/><path d="M6 14v1a6 6 0 006 6h2a6 6 0 006-6v-5a2 2 0 00-4 0v2"/></svg>}
+function OverlayIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="13" height="13" rx="1.5"/><rect x="9" y="6" width="13" height="13" rx="1.5" fill="currentColor" fillOpacity=".15"/></svg>}
 function EyeIcon(){return<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}
 function EyeOffIcon(){return<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" opacity=".4"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>}
 function DeselectIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="1" strokeDasharray="4 2"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg>}
