@@ -681,6 +681,7 @@ export default function App() {
   const [cropRect,setCropRect] = useState(null)
   const [appliedCrop,setAppliedCrop] = useState(null)
   const [photoAreaDragOver,setPhotoAreaDragOver] = useState(false)
+  const [pressureSensitivity,setPressureSensitivity] = useState(true)
 
   const setHardMode = v => { if(v&&activeTool!==TOOLS.PEN)setActiveTool(TOOLS.PEN); _setHardMode(v) }
 
@@ -759,7 +760,7 @@ export default function App() {
   const penShiftSnapRef = useRef(null)
 
   const S = useRef({})
-  S.current = {activeTool,penColor,penSize,eraserSize,activeLayerId,refOpacity,layers,showGrid,gridVisible,gridSize,gridOpacity,practiceMode,practiceDrawMode,practiceStyle,practiceObject,rulerType,rulerDivisions,rulerColor,hardMode,practiceOrbit,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity}
+  S.current = {activeTool,penColor,penSize,eraserSize,activeLayerId,refOpacity,layers,showGrid,gridVisible,gridSize,gridOpacity,practiceMode,practiceDrawMode,practiceStyle,practiceObject,rulerType,rulerDivisions,rulerColor,hardMode,practiceOrbit,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity,pressureSensitivity}
   viewZoomRef.current = viewZoom
   dispSizeRef.current = dispSize
   shortcutsRef.current = shortcuts
@@ -1229,7 +1230,7 @@ export default function App() {
       const ctx=draw?.getContext('2d');if(!ctx)return
       saveHist()
       penStrokeStart.current=pt;penSnapDirRef.current=null;lastClientXY.current={x:e.clientX,y:e.clientY}
-      const pr=e.pointerType==='pen'?Math.max(0.05,e.pressure):1
+      const pr=(S.current.pressureSensitivity&&e.pointerType==='pen')?Math.max(0.05,e.pressure):1
       const sz=Math.max(1,activeSize*pr)
       ctx.globalCompositeOperation=activeTool===TOOLS.ERASER?'destination-out':'source-over'
       ctx.fillStyle=activeTool===TOOLS.ERASER?'rgba(0,0,0,1)':penColor
@@ -1339,7 +1340,7 @@ export default function App() {
     }
     if(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER){
       const ctx=draw?.getContext('2d');if(!ctx)return
-      const pr=e.pointerType==='pen'?Math.max(0.05,e.pressure):1
+      const pr=(S.current.pressureSensitivity&&e.pointerType==='pen')?Math.max(0.05,e.pressure):1
       const sz=Math.max(1,activeSize*pr)
       ctx.globalCompositeOperation=activeTool===TOOLS.ERASER?'destination-out':'source-over'
       ctx.strokeStyle=activeTool===TOOLS.ERASER?'rgba(0,0,0,1)':penColor
@@ -2328,6 +2329,10 @@ export default function App() {
                       className="tool-size-input"/>
                     <button className="size-step-btn" onClick={()=>setPenSize(v=>Math.min(100,v+1))}>+</button>
                   </div>
+                  <label className="pressure-toggle-row" title="ワコム等のペンタブレットで筆圧を線の太さに反映します">
+                    <input type="checkbox" checked={pressureSensitivity} onChange={e=>setPressureSensitivity(e.target.checked)}/>
+                    <span>筆圧感知</span>
+                  </label>
                 </div>
               </>}
               {(activeTool===TOOLS.ERASER)&&<>
