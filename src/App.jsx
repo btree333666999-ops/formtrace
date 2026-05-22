@@ -1044,6 +1044,7 @@ export default function App() {
   useEffect(()=>{comp()},[comp,refOpacity])
   useEffect(()=>{comp()},[comp,layers])
   useEffect(()=>{comp()},[comp,practiceStyle,practiceMode,practiceObject,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity])
+  useEffect(()=>{comp()},[comp,flipPhoto,flipDraw])
   useEffect(()=>{
     if(activeTool!==TOOLS.RULER&&placingRulerIdRef.current){
       setRulers(rs=>rs.filter(r=>r.id!==placingRulerIdRef.current))
@@ -2378,6 +2379,7 @@ export default function App() {
             {(viewZoom!==100||panOffset.x||panOffset.y)&&<button className="bb-reset-btn" onClick={()=>{setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}} title="表示位置・ズームをリセット">⟳</button>}
             <button className={`bb-crop-btn${flipPhoto?' bb-crop-reset':''}`} onClick={()=>setFlipPhoto(v=>!v)} title="参考画像を左右反転"><FlipHIcon/></button>
             <button className={`bb-crop-btn${flipDraw?' bb-crop-reset':''}`} onClick={()=>setFlipDraw(v=>!v)} title="描画エリアを左右反転"><FlipHIcon/></button>
+            <button className={`bb-crop-btn${flipPhoto&&flipDraw?' bb-crop-reset':''}`} onClick={()=>{const b=!(flipPhoto&&flipDraw);setFlipPhoto(b);setFlipDraw(b)}} title="両方を左右反転"><FlipBothIcon/></button>
             <div style={{flex:1}}/>
             {(refImage||practiceMode)&&(practiceMode?practiceOverlay:refOverlay)&&<>
               <input type="range" min="0" max="100"
@@ -2413,6 +2415,7 @@ export default function App() {
                 <div className="nav-hdr-btns">
                   <button className={`nav-icon-btn${flipPhoto?' active':''}`} onClick={()=>setFlipPhoto(v=>!v)} title="参考画像を左右反転"><FlipHIcon/></button>
                   <button className={`nav-icon-btn${flipDraw?' active':''}`} onClick={()=>setFlipDraw(v=>!v)} title="描画エリアを左右反転"><FlipHIcon/></button>
+                  <button className={`nav-icon-btn${flipPhoto&&flipDraw?' active':''}`} onClick={()=>{const b=!(flipPhoto&&flipDraw);setFlipPhoto(b);setFlipDraw(b)}} title="両方を左右反転"><FlipBothIcon/></button>
                   <button className="nav-icon-btn" onClick={()=>{setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}} title="表示をリセット"><ResetIcon/></button>
                 </div>
               </div>
@@ -2847,6 +2850,7 @@ function MenuIcon(){return<svg width="18" height="18" viewBox="0 0 20 20" fill="
 function UndoIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 00-4-4H4"/></svg>}
 function ClearLayerIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="6" x2="12" y2="2"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="7.76" y1="16.24" x2="4.93" y2="19.07"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="7.76" y1="7.76" x2="4.93" y2="4.93"/></svg>}
 function FlipHIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="4" x2="12" y2="20" strokeDasharray="2 2.5"/><path d="M8 8L3 12L8 16"/><path d="M16 8L21 12L16 16"/></svg>}
+function FlipBothIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M7 5L3 12L7 19"/><path d="M17 5L21 12L17 19"/><line x1="12" y1="4" x2="12" y2="20" strokeDasharray="2 2.5"/></svg>}
 function MergeDownIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="9" width="13" height="13" rx="2"/><rect x="9" y="2" width="13" height="13" rx="2"/><line x1="15" y1="9" x2="9" y2="15"/><polyline points="9,12 9,15 12,15"/></svg>}
 function ResetIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>}
 function RedoIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 014-4h12"/></svg>}
