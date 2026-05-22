@@ -1750,13 +1750,20 @@ export default function App() {
     if(isPaper){ctx.fillStyle='#fff';ctx.fillRect(0,0,cw,ch)}else{ctx.clearRect(0,0,cw,ch)}
     comp();tick()
   },[activeLayerId,layers,tick,saveHist,comp])
-  const flatten=useCallback(()=>{
+  const mergeDown=useCallback(()=>{
+    const dl=layers.filter(l=>!l.isPaper)
+    const idx=dl.findIndex(l=>l.id===activeLayerId)
+    if(idx<=0)return // 最下レイヤーは結合先がない
+    const above=dl[idx],below=dl[idx-1]
+    const ca=layerCanvases.current[above.id],cb=layerCanvases.current[below.id]
+    if(!ca||!cb)return
     const {w:cw,h:ch}=cvRef.current
-    const m=document.createElement('canvas');m.width=cw;m.height=ch;const ctx=m.getContext('2d')
-    layers.filter(l=>!l.isPaper).forEach(l=>{if(!l.visible)return;const lc=layerCanvases.current[l.id];if(!lc)return;ctx.globalAlpha=l.opacity/100;ctx.drawImage(lc,0,0)});ctx.globalAlpha=1
-    const nid=layerCounter++;layerCanvases.current={[PAPER_ID]:layerCanvases.current[PAPER_ID],[nid]:m}
-    setLayers([mkPaper(),mkLayer(nid,'結合')]);setActiveLayerId(nid)
-  },[layers])
+    const ctx=cb.getContext('2d')
+    ctx.save();ctx.globalAlpha=above.opacity/100;ctx.drawImage(ca,0,0);ctx.restore()
+    delete layerCanvases.current[above.id]
+    setLayers(ls=>ls.filter(l=>l.id!==above.id))
+    setActiveLayerId(below.id)
+  },[layers,activeLayerId])
 
   // ── Layer drag-to-reorder ─────────────────────────────────────
   const onLayerPointerDown = useCallback((listIdx, e)=>{
@@ -2500,7 +2507,7 @@ export default function App() {
                   <button onClick={addLayer} title="新規">+</button>
                   <button onClick={deleteLayer} disabled={drawingLayers.length<=1} title="削除">−</button>
                   <button onClick={clearActive} title="クリア" className="btn-warn"><ClearLayerIcon/></button>
-                  <button onClick={flatten} title="統合" className="btn-merge">⊕</button>
+                  <button onClick={mergeDown} title="下のレイヤーと結合" className="btn-merge" disabled={layers.filter(l=>!l.isPaper).findIndex(l=>l.id===activeLayerId)<=0}><MergeDownIcon/></button>
                 </div>
               </div>
               {activeLayerId===PHOTO_ID&&(
@@ -2742,7 +2749,8 @@ function drawSelPath(ctx,sel){
 function TB({label,active,onClick,children}){return <button className={`tool-btn${active?' active':''}`} onClick={onClick} title={label}>{children}</button>}
 function MenuIcon(){return<svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="2" y1="5" x2="18" y2="5"/><line x1="2" y1="10" x2="18" y2="10"/><line x1="2" y1="15" x2="18" y2="15"/></svg>}
 function UndoIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 00-4-4H4"/></svg>}
-function ClearLayerIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"/><line x1="19.1" y1="4.9" x2="4.9" y2="19.1"/></svg>}
+function ClearLayerIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="1" x2="12" y2="8"/><line x1="12" y1="16" x2="12" y2="23"/><line x1="1" y1="12" x2="8" y2="12"/><line x1="16" y1="12" x2="23" y2="12"/><line x1="4.2" y1="4.2" x2="9.2" y2="9.2"/><line x1="14.8" y1="14.8" x2="19.8" y2="19.8"/><line x1="19.8" y1="4.2" x2="14.8" y2="9.2"/><line x1="9.2" y1="14.8" x2="4.2" y2="19.8"/><circle cx="12" cy="12" r="4"/></svg>}
+function MergeDownIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="13" y="2" width="9" height="9" rx="1"/><rect x="2" y="13" width="9" height="9" rx="1"/><line x1="13" y1="11" x2="11" y2="13"/><polyline points="13,13 11,13 11,11"/></svg>}
 function ResetIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>}
 function RedoIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 014-4h12"/></svg>}
 function PenIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>}
