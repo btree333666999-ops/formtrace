@@ -2018,7 +2018,6 @@ export default function App() {
     const items=[],dlRev=[...drawingLayers].reverse()
     dlRev.forEach(l=>items.push({type:'layer',layer:l}))
     if(refImage)items.push({type:'photo'})
-    if(paperLayer)items.push({type:'layer',layer:paperLayer})
     return items
   }
   const listItems=buildListItems()
