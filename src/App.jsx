@@ -28,12 +28,18 @@ function applySnap(pt,{angleSnap=false,gridSnap=false,gridSize=100,lineFrom=null
   return{x,y}
 }
 
-const DEFAULT_SHORTCUTS={pen:'b',eraser:'e',select:'s',move:'v',line:'l',ruler:'r',grid:'g',hand:'h',sizeUp:']',sizeDn:'['}
+const DEFAULT_SHORTCUTS={pen:'b',eraser:'e',select:'s',move:'v',line:'l',ruler:'r',grid:'g',hand:'h',sizeUp:']',sizeDn:'[',undo:'-',redo:'+',fitScreen:'',flipH:'',springEraser:'',springHand:'',springMove:''}
 const SHORTCUT_ACTIONS=[
   {a:'pen',l:'ペン'},{a:'eraser',l:'消しゴム'},{a:'select',l:'選択範囲'},
   {a:'move',l:'レイヤー移動'},{a:'line',l:'直線'},{a:'ruler',l:'定規'},
   {a:'hand',l:'手のひら移動'},
   {a:'grid',l:'マス目切替'},{a:'sizeUp',l:'サイズ拡大'},{a:'sizeDn',l:'サイズ縮小'},
+  {a:'undo',l:'取り消し'},{a:'redo',l:'やり直し'},
+  {a:'fitScreen',l:'全体表示'},
+  {a:'flipH',l:'左右反転'},
+  {a:'springEraser',l:'一時消しゴム（押しっぱなし）'},
+  {a:'springHand',l:'一時手のひら（押しっぱなし）'},
+  {a:'springMove',l:'一時レイヤー移動（押しっぱなし）'},
 ]
 
 // ── Practice compound objects ──────────────────────────────────────
@@ -682,6 +688,7 @@ export default function App() {
   const [appliedCrop,setAppliedCrop] = useState(null)
   const [photoAreaDragOver,setPhotoAreaDragOver] = useState(false)
   const [pressureSensitivity,setPressureSensitivity] = useState(true)
+  const [flipH,setFlipH] = useState(false)
 
   const setHardMode = v => { if(v&&activeTool!==TOOLS.PEN)setActiveTool(TOOLS.PEN); _setHardMode(v) }
 
@@ -759,6 +766,10 @@ export default function App() {
   const penSnapDirRef   = useRef(null)
   const penShiftSnapRef = useRef(null)
   const smoothPtRef     = useRef(null)
+  const springToolRef   = useRef(null)
+  const flipHRef        = useRef(false)
+
+  flipHRef.current = flipH
 
   const S = useRef({})
   S.current = {activeTool,penColor,penSize,eraserSize,activeLayerId,refOpacity,layers,showGrid,gridVisible,gridSize,gridOpacity,practiceMode,practiceDrawMode,practiceStyle,practiceObject,rulerType,rulerDivisions,rulerColor,hardMode,practiceOrbit,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity,pressureSensitivity}
@@ -1043,8 +1054,12 @@ export default function App() {
       }
       setViewZoom(z=>Math.round(Math.min(400,Math.max(20,z*Math.pow(0.999,e.deltaY)))))
     }
+    const onMouseDown=e=>{
+      if(e.button===1){e.preventDefault();setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}
+    }
     el.addEventListener('wheel',onWheel,{passive:false})
-    return()=>el.removeEventListener('wheel',onWheel)
+    el.addEventListener('mousedown',onMouseDown)
+    return()=>{el.removeEventListener('wheel',onWheel);el.removeEventListener('mousedown',onMouseDown)}
   },[])
 
   // ── Three.js scene ────────────────────────────────────────────
@@ -1170,7 +1185,8 @@ export default function App() {
     const disp=displayRef.current;if(!disp)return{x:0,y:0}
     const r=disp.getBoundingClientRect()
     const {w:cw,h:ch}=cvRef.current
-    return{x:(e.clientX-r.left)*(cw/r.width),y:(e.clientY-r.top)*(ch/r.height)}
+    const rawX=(e.clientX-r.left)*(cw/r.width)
+    return{x:flipHRef.current?cw-rawX:rawX,y:(e.clientY-r.top)*(ch/r.height)}
   }
 
   // ── Handlers ──────────────────────────────────────────────────
@@ -1554,6 +1570,7 @@ export default function App() {
   }
 
   useEffect(()=>{
+    const fitScreen=()=>{setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}
     const h=e=>{
       if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&e.key==='z'){e.preventDefault();doUndoRef.current();return}
       if((e.ctrlKey||e.metaKey)&&(e.key==='y'||(e.shiftKey&&e.key==='z'))){e.preventDefault();doRedoRef.current();return}
@@ -1569,6 +1586,16 @@ export default function App() {
       if(e.ctrlKey||e.metaKey||e.altKey||e.shiftKey)return
       const {activeTool,hardMode}=S.current
       const sc=shortcutsRef.current,k=e.key
+      // spring tools (押しっぱなし一時切り替え)
+      if(sc.springEraser&&k===sc.springEraser&&!e.repeat&&!springToolRef.current){
+        springToolRef.current={key:k,from:activeTool};setActiveTool(TOOLS.ERASER);return
+      }
+      if(sc.springHand&&k===sc.springHand&&!e.repeat&&!springToolRef.current){
+        springToolRef.current={key:k,from:activeTool};setActiveTool(TOOLS.HAND);return
+      }
+      if(sc.springMove&&k===sc.springMove&&!e.repeat&&!springToolRef.current){
+        springToolRef.current={key:k,from:activeTool};setActiveTool(TOOLS.MOVE);return
+      }
       if(k===sc.pen){setActiveTool(TOOLS.PEN)}
       else if(k===sc.eraser&&!hardMode){setActiveTool(TOOLS.ERASER)}
       else if(k===sc.select&&!hardMode){setActiveTool(TOOLS.SELECT)}
@@ -1588,13 +1615,28 @@ export default function App() {
         if(activeTool===TOOLS.ERASER)setEraserSize(v=>Math.max(1,v-5))
         else setPenSize(v=>Math.max(1,v-1))
       }
+      else if(sc.undo&&k===sc.undo){doUndoRef.current()}
+      else if(sc.redo&&k===sc.redo){doRedoRef.current()}
+      else if(sc.fitScreen&&k===sc.fitScreen){fitScreen()}
+      else if(sc.flipH&&k===sc.flipH){setFlipH(v=>!v)}
+    }
+    const onKeyUp=e=>{
+      if(springToolRef.current&&e.key===springToolRef.current.key){
+        const from=springToolRef.current.from;springToolRef.current=null;setActiveTool(from)
+      }
     }
     const onShiftDn=e=>{if(e.key==='Shift'){shiftKeyRef.current=true;compRef.current?.()}}
     const onShiftUp=e=>{if(e.key==='Shift'){shiftKeyRef.current=false;penSnapDirRef.current=null;penShiftSnapRef.current=null;compRef.current?.()}}
     window.addEventListener('keydown',h)
+    window.addEventListener('keyup',onKeyUp)
     window.addEventListener('keydown',onShiftDn)
     window.addEventListener('keyup',onShiftUp)
-    return()=>{window.removeEventListener('keydown',h);window.removeEventListener('keydown',onShiftDn);window.removeEventListener('keyup',onShiftUp)}
+    return()=>{
+      window.removeEventListener('keydown',h)
+      window.removeEventListener('keyup',onKeyUp)
+      window.removeEventListener('keydown',onShiftDn)
+      window.removeEventListener('keyup',onShiftUp)
+    }
   },[])
 
   // ── Tabmate WebHID ────────────────────────────────────────────
@@ -2161,7 +2203,7 @@ export default function App() {
             <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
               <div style={{position:'relative',flexShrink:0,
                 width:dispSize.w||cvW,height:dispSize.h||cvH,
-                transform:(viewZoom!==100||panOffset.x||panOffset.y)?`translate(${panOffset.x}px,${panOffset.y}px) scale(${viewZoom/100})`:'none',
+                transform:`translate(${panOffset.x}px,${panOffset.y}px) scale(${viewZoom/100})${flipH?' scaleX(-1)':''}`,
                 transformOrigin:'center'}}>
                 <canvas ref={displayRef} width={cvW} height={cvH}
                   style={{width:'100%',height:'100%',display:'block',cursor,touchAction:'none'}}
