@@ -690,6 +690,10 @@ export default function App() {
   const [pressureSensitivity,setPressureSensitivity] = useState(true)
   const [flipPhoto,setFlipPhoto] = useState(false)
   const [flipDraw,setFlipDraw] = useState(false)
+  const [panelOrder,setPanelOrder] = useState(['nav','tool','layer'])
+  const [sidebarLeft,setSidebarLeft] = useState(false)
+  const [panelDragSrc,setPanelDragSrc] = useState(null)
+  const [panelDropIdx,setPanelDropIdx] = useState(null)
 
   const setHardMode = v => { if(v&&activeTool!==TOOLS.PEN)setActiveTool(TOOLS.PEN); _setHardMode(v) }
 
@@ -770,6 +774,7 @@ export default function App() {
   const springToolRef   = useRef(null)
   const flipPhotoRef    = useRef(false)
   const flipDrawRef     = useRef(false)
+  const panelDragRef    = useRef({idx:null,dropIdx:null,startY:0,moved:false})
 
   flipPhotoRef.current = flipPhoto
   flipDrawRef.current = flipDraw
@@ -1922,6 +1927,35 @@ export default function App() {
     document.addEventListener('touchend',onEnd)
   },[setActiveLayerId,setLayers])
 
+  const onPanelGrab=useCallback((srcIdx,e)=>{
+    e.preventDefault();e.stopPropagation()
+    panelDragRef.current={idx:srcIdx,dropIdx:srcIdx,startY:e.clientY,moved:false}
+    setPanelDragSrc(srcIdx)
+    const onMove=ev=>{
+      if(Math.abs(ev.clientY-panelDragRef.current.startY)>4)panelDragRef.current.moved=true
+      const el=document.querySelector('.sidebar-col');if(!el)return
+      const panels=[...el.querySelectorAll('.panel-section')]
+      let drop=panels.length-1
+      for(let i=0;i<panels.length;i++){
+        const r=panels[i].getBoundingClientRect()
+        if(ev.clientY<r.top+r.height/2){drop=i;break}
+      }
+      panelDragRef.current.dropIdx=drop;setPanelDropIdx(drop)
+    }
+    const onUp=()=>{
+      const{idx:src,dropIdx:dst,moved}=panelDragRef.current
+      panelDragRef.current={idx:null,dropIdx:null,startY:0,moved:false}
+      setPanelDragSrc(null);setPanelDropIdx(null)
+      if(moved&&src!==null&&dst!==null&&src!==dst){
+        setPanelOrder(prev=>{const a=[...prev];const[item]=a.splice(src,1);a.splice(dst>src?dst-1:dst,0,item);return a})
+      }
+      document.removeEventListener('mousemove',onMove)
+      document.removeEventListener('mouseup',onUp)
+    }
+    document.addEventListener('mousemove',onMove)
+    document.addEventListener('mouseup',onUp)
+  },[])
+
   // ── Crop helpers ──────────────────────────────────────────────
   const startCrop=()=>{
     const {w:cw,h:ch}=cvRef.current
@@ -2407,251 +2441,218 @@ export default function App() {
         </div>
 
         {showLayerPanel&&(
-          <div className="sidebar-col">
-            {/* ── ナビゲーター ─────────────────────────── */}
-            <div className="nav-sidebar">
-              <div className="pen-sidebar-hdr nav-hdr">
-                <span>ナビゲーター</span>
-                <div className="nav-hdr-btns">
-                  <button className={`nav-icon-btn${flipPhoto?' active':''}`} onClick={()=>setFlipPhoto(v=>!v)} title="参考画像を左右反転"><FlipHIcon/></button>
-                  <button className={`nav-icon-btn${flipDraw?' active':''}`} onClick={()=>setFlipDraw(v=>!v)} title="描画エリアを左右反転"><FlipHIcon/></button>
-                  <button className={`nav-icon-btn${flipPhoto&&flipDraw?' active':''}`} onClick={()=>{const b=!(flipPhoto&&flipDraw);setFlipPhoto(b);setFlipDraw(b)}} title="両方を左右反転"><FlipBothIcon/></button>
-                  <button className="nav-icon-btn" onClick={()=>{setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}} title="表示をリセット"><ResetIcon/></button>
-                </div>
-              </div>
-              <div className="nav-canvas-wrap">
-                <canvas ref={navigatorRef}
-                  style={{width:'100%',display:'block',cursor:'crosshair'}}
-                  onPointerDown={onNavDown}
-                  onPointerMove={onNavMove}
-                  onPointerUp={onNavUp}/>
-              </div>
+          <div className={`sidebar-col${sidebarLeft?' sidebar-col--left':''}`}>
+            {/* ── サイドバー移動バー ─── */}
+            <div className="sidebar-top-ctrl">
+              <button className="nav-icon-btn" onClick={()=>setSidebarLeft(v=>!v)} title={sidebarLeft?"右に移動":"左に移動"}>
+                {sidebarLeft?<ChevronRightIcon/>:<ChevronLeftIcon/>}
+              </button>
             </div>
-            {/* ── ツール設定（上部固定）─────────────────── */}
-            <aside className="pen-sidebar">
-              {(activeTool===TOOLS.PEN)&&<>
-                <div className="pen-sidebar-hdr">ペン設定</div>
-                <div className="pen-sidebar-body tool-body">
-                  <div className="tool-size-row">
-                    <span className="tool-label">太さ</span>
-                    <input type="range" min="1" max="100" value={penSize}
-                      onChange={e=>setPenSize(+e.target.value)} className="tool-slider"/>
-                    <button className="size-step-btn" onClick={()=>setPenSize(v=>Math.max(1,v-1))}>−</button>
-                    <input type="number" min="1" max="100" value={penSize}
-                      onChange={e=>{const v=Math.max(1,Math.min(100,+e.target.value||1));setPenSize(v)}}
-                      className="tool-size-input"/>
-                    <button className="size-step-btn" onClick={()=>setPenSize(v=>Math.min(100,v+1))}>+</button>
-                  </div>
-                  <label className="pressure-toggle-row" title="ワコム等のペンタブレットで筆圧を線の太さに反映します">
-                    <input type="checkbox" checked={pressureSensitivity} onChange={e=>setPressureSensitivity(e.target.checked)}/>
-                    <span>筆圧感知</span>
-                  </label>
-                </div>
-              </>}
-              {(activeTool===TOOLS.ERASER)&&<>
-                <div className="pen-sidebar-hdr">消しゴム</div>
-                <div className="pen-sidebar-body tool-body">
-                  <div className="tool-size-row">
-                    <span className="tool-label">太さ</span>
-                    <input type="range" min="1" max="80" value={eraserSize}
-                      onChange={e=>setEraserSize(+e.target.value)} className="tool-slider"/>
-                    <button className="size-step-btn" onClick={()=>setEraserSize(v=>Math.max(1,v-1))}>−</button>
-                    <input type="number" min="1" max="999" value={eraserSize}
-                      onChange={e=>{const v=Math.max(1,Math.min(999,+e.target.value||1));setEraserSize(v)}}
-                      className="tool-size-input"/>
-                    <button className="size-step-btn" onClick={()=>setEraserSize(v=>Math.min(999,v+1))}>+</button>
-                  </div>
-                </div>
-              </>}
-              {showGrid&&!hardMode&&<>
-                <div className="pen-sidebar-hdr" style={{display:'flex',alignItems:'center',justifyContent:'space-between',paddingRight:6}}>
-                  <span>マス目</span>
-                  <button className="ruler-del-btn" onClick={()=>setGridVisible(v=>!v)} title={gridVisible?'非表示にする':'表示する'} style={{opacity:gridVisible?1:.45}}>
-                    {gridVisible?<EyeIcon/>:<EyeOffIcon/>}
-                  </button>
-                </div>
-                <div className="pen-sidebar-body">
-                  <div className="pen-size-row" style={{gap:4,marginBottom:4}}>
-                    <button className={`grid-mode-btn${gridSize>0?' gm-active':''}`} onClick={()=>{if(gridSize<0)setGridSize(100)}}>サイズ</button>
-                    <button className={`grid-mode-btn${gridSize<0?' gm-active':''}`} onClick={()=>{if(gridSize>0)setGridSize(-4)}}>分割</button>
-                  </div>
-                  {gridSize>0?(
-                    <div className="tool-size-row">
-                      <span className="tool-label">px</span>
-                      <input type="range" min="20" max="500" value={gridSize}
-                        onChange={e=>setGridSize(+e.target.value)} className="tool-slider"/>
-                      <input type="number" min="1" max="2000" value={gridSize}
-                        onChange={e=>{const v=Math.max(1,+e.target.value||1);setGridSize(v)}}
-                        className="tool-size-input"/>
+            {panelOrder.map((panelId,idx)=>{
+              const isDragging=panelDragSrc===idx
+              const isDropTarget=panelDropIdx===idx&&panelDragSrc!==null&&panelDragSrc!==idx
+              const isLast=idx===panelOrder.length-1
+              const panelCls=`panel-section${isDragging?' panel-dragging':''}${isDropTarget?' panel-drop-here':''}`
+              const grab=<span className="panel-grab" onMouseDown={e=>onPanelGrab(idx,e)} title="ドラッグして並べ替え"><GrabIcon/></span>
+              if(panelId==='nav')return(
+                <div key="nav" className={`nav-sidebar ${panelCls}`} style={isLast?{flex:1,overflow:'hidden'}:{}}>
+                  <div className="pen-sidebar-hdr nav-hdr">
+                    {grab}<span>ナビゲーター</span>
+                    <div className="nav-hdr-btns">
+                      <button className={`nav-icon-btn${flipPhoto?' active':''}`} onClick={()=>setFlipPhoto(v=>!v)} title="参考画像を左右反転"><FlipHIcon/></button>
+                      <button className={`nav-icon-btn${flipDraw?' active':''}`} onClick={()=>setFlipDraw(v=>!v)} title="描画エリアを左右反転"><FlipHIcon/></button>
+                      <button className={`nav-icon-btn${flipPhoto&&flipDraw?' active':''}`} onClick={()=>{const b=!(flipPhoto&&flipDraw);setFlipPhoto(b);setFlipDraw(b)}} title="両方を左右反転"><FlipBothIcon/></button>
+                      <button className="nav-icon-btn" onClick={()=>{setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}} title="表示をリセット"><ResetIcon/></button>
                     </div>
-                  ):(
-                    <div className="tool-size-row">
-                      <span className="tool-label">分割</span>
-                      <input type="range" min="2" max="20" value={-gridSize}
-                        onChange={e=>setGridSize(-e.target.value)} className="tool-slider"/>
-                      <input type="number" min="1" max="32" value={-gridSize}
-                        onChange={e=>{const v=Math.max(1,Math.min(32,+e.target.value||1));setGridSize(-v)}}
-                        className="tool-size-input"/>
+                  </div>
+                  <div className="nav-canvas-wrap">
+                    <canvas ref={navigatorRef} style={{width:'100%',display:'block',cursor:'crosshair'}}
+                      onPointerDown={onNavDown} onPointerMove={onNavMove} onPointerUp={onNavUp}/>
+                  </div>
+                </div>
+              )
+              if(panelId==='tool')return(
+                <aside key="tool" className={`pen-sidebar ${panelCls}`} style={isLast?{flex:1,overflowY:'auto'}:{}}>
+                  <div className="panel-grab-bar" onMouseDown={e=>onPanelGrab(idx,e)}><GrabIcon/></div>
+                  {(activeTool===TOOLS.PEN)&&<>
+                    <div className="pen-sidebar-hdr">ペン設定</div>
+                    <div className="pen-sidebar-body tool-body">
+                      <div className="tool-size-row">
+                        <span className="tool-label">太さ</span>
+                        <input type="range" min="1" max="100" value={penSize} onChange={e=>setPenSize(+e.target.value)} className="tool-slider"/>
+                        <button className="size-step-btn" onClick={()=>setPenSize(v=>Math.max(1,v-1))}>−</button>
+                        <input type="number" min="1" max="100" value={penSize} onChange={e=>{const v=Math.max(1,Math.min(100,+e.target.value||1));setPenSize(v)}} className="tool-size-input"/>
+                        <button className="size-step-btn" onClick={()=>setPenSize(v=>Math.min(100,v+1))}>+</button>
+                      </div>
+                      <label className="pressure-toggle-row" title="ワコム等のペンタブレットで筆圧を線の太さに反映します">
+                        <input type="checkbox" checked={pressureSensitivity} onChange={e=>setPressureSensitivity(e.target.checked)}/>
+                        <span>筆圧感知</span>
+                      </label>
+                    </div>
+                  </>}
+                  {(activeTool===TOOLS.ERASER)&&<>
+                    <div className="pen-sidebar-hdr">消しゴム</div>
+                    <div className="pen-sidebar-body tool-body">
+                      <div className="tool-size-row">
+                        <span className="tool-label">太さ</span>
+                        <input type="range" min="1" max="80" value={eraserSize} onChange={e=>setEraserSize(+e.target.value)} className="tool-slider"/>
+                        <button className="size-step-btn" onClick={()=>setEraserSize(v=>Math.max(1,v-1))}>−</button>
+                        <input type="number" min="1" max="999" value={eraserSize} onChange={e=>{const v=Math.max(1,Math.min(999,+e.target.value||1));setEraserSize(v)}} className="tool-size-input"/>
+                        <button className="size-step-btn" onClick={()=>setEraserSize(v=>Math.min(999,v+1))}>+</button>
+                      </div>
+                    </div>
+                  </>}
+                  {showGrid&&!hardMode&&<>
+                    <div className="pen-sidebar-hdr" style={{display:'flex',alignItems:'center',justifyContent:'space-between',paddingRight:6}}>
+                      <span>マス目</span>
+                      <button className="ruler-del-btn" onClick={()=>setGridVisible(v=>!v)} title={gridVisible?'非表示にする':'表示する'} style={{opacity:gridVisible?1:.45}}>
+                        {gridVisible?<EyeIcon/>:<EyeOffIcon/>}
+                      </button>
+                    </div>
+                    <div className="pen-sidebar-body">
+                      <div className="pen-size-row" style={{gap:4,marginBottom:4}}>
+                        <button className={`grid-mode-btn${gridSize>0?' gm-active':''}`} onClick={()=>{if(gridSize<0)setGridSize(100)}}>サイズ</button>
+                        <button className={`grid-mode-btn${gridSize<0?' gm-active':''}`} onClick={()=>{if(gridSize>0)setGridSize(-4)}}>分割</button>
+                      </div>
+                      {gridSize>0?(
+                        <div className="tool-size-row">
+                          <span className="tool-label">px</span>
+                          <input type="range" min="20" max="500" value={gridSize} onChange={e=>setGridSize(+e.target.value)} className="tool-slider"/>
+                          <input type="number" min="1" max="2000" value={gridSize} onChange={e=>{const v=Math.max(1,+e.target.value||1);setGridSize(v)}} className="tool-size-input"/>
+                        </div>
+                      ):(
+                        <div className="tool-size-row">
+                          <span className="tool-label">分割</span>
+                          <input type="range" min="2" max="20" value={-gridSize} onChange={e=>setGridSize(-e.target.value)} className="tool-slider"/>
+                          <input type="number" min="1" max="32" value={-gridSize} onChange={e=>{const v=Math.max(1,Math.min(32,+e.target.value||1));setGridSize(-v)}} className="tool-size-input"/>
+                        </div>
+                      )}
+                      <div className="tool-size-row" style={{marginTop:6}}>
+                        <span className="tool-label">濃度</span>
+                        <input type="range" min="10" max="100" value={gridOpacity} onChange={e=>setGridOpacity(+e.target.value)} className="tool-slider"/>
+                        <span className="tool-size-val">{gridOpacity}%</span>
+                      </div>
+                    </div>
+                  </>}
+                  {showRuler&&!hardMode&&(()=>{
+                    const ar=rulers.find(r=>r.id===activeRulerId)
+                    return<>
+                      <div className="pen-sidebar-hdr">定規{activeTool===TOOLS.RULER&&<span className="ruler-add-hint">ドラッグで追加</span>}</div>
+                      <div className="pen-sidebar-body">
+                        {rulers.length>0&&<div className="ruler-list">
+                          {rulers.map((r,i)=>(
+                            <div key={r.id} className={`ruler-row${activeRulerId===r.id?' ruler-row--active':''}`} style={r.visible===false?{opacity:.55}:undefined}
+                              onClick={()=>{setActiveRulerId(r.id);if(activeRulerId!==r.id)setRulerSettingsOpen(false)}}>
+                              <span className="ruler-color-dot" style={{background:r.color}}/>
+                              <span className="ruler-row-label">{i+1}. {r.type==='none'?'線':r.type==='cm'?'cm':`÷${r.divisions}`}</span>
+                              {activeRulerId===r.id&&<button className="ruler-del-btn" style={{marginRight:1}} onClick={e=>{e.stopPropagation();setRulerSettingsOpen(v=>!v)}} title="設定">
+                                <span style={{display:'inline-block',transform:rulerSettingsOpen?'rotate(180deg)':'none',transition:'transform .15s'}}>∨</span>
+                              </button>}
+                              <button className="ruler-del-btn" style={{opacity:r.visible===false?.4:1}} onClick={e=>{e.stopPropagation();setRulers(rs=>rs.map(x=>x.id===r.id?{...x,visible:x.visible===false}:x))}} title={r.visible===false?'表示する':'非表示にする'}>
+                                {r.visible===false?<EyeOffIcon/>:<EyeIcon/>}
+                              </button>
+                              <button className="ruler-del-btn" onClick={e=>{e.stopPropagation();setRulers(rs=>rs.filter(x=>x.id!==r.id));if(activeRulerId===r.id)setActiveRulerId(null)}}>✕</button>
+                            </div>
+                          ))}
+                        </div>}
+                        {ar&&rulerSettingsOpen&&<div className="ruler-settings">
+                          <div className="ruler-settings-title">定規 {rulers.indexOf(ar)+1} の設定</div>
+                          <select value={ar.type} onChange={e=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,type:e.target.value}:r))} className="sel-sm" style={{width:'100%',marginBottom:5}}>
+                            <option value="none">メモリなし</option><option value="cm">cm メモリ</option><option value="div">等分割</option>
+                          </select>
+                          <div className="tool-size-row" style={{marginBottom:5,flexWrap:'wrap',gap:4}}>
+                            <span className="tool-label">色</span>
+                            <div style={{display:'flex',gap:3,alignItems:'center',flexWrap:'wrap'}}>
+                              {PRESET_COLORS.map(c=>(<button key={c} className={`swatch${ar.color===c?' sel':''}`} style={{background:c,width:18,height:18}} onClick={()=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,color:c}:r))}/>))}
+                              <ToggleColorPicker value={ar.color} onChange={c=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,color:c}:r))}/>
+                            </div>
+                          </div>
+                          {ar.type==='div'&&<div className="tool-size-row">
+                            <span className="tool-label">分割数</span>
+                            <input type="range" min="2" max="24" value={ar.divisions} onChange={e=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,divisions:+e.target.value}:r))} className="tool-slider"/>
+                            <span className="tool-size-val">{ar.divisions}</span>
+                          </div>}
+                        </div>}
+                        {activeTool===TOOLS.RULER&&<div className="ruler-default-section">
+                          <div className="ruler-settings-title">次の定規</div>
+                          <div className="tool-size-row" style={{marginBottom:5,flexWrap:'wrap',gap:4}}>
+                            <span className="tool-label">色</span>
+                            <div style={{display:'flex',gap:3,alignItems:'center',flexWrap:'wrap'}}>
+                              {PRESET_COLORS.map(c=>(<button key={c} className={`swatch${rulerColor===c?' sel':''}`} style={{background:c,width:18,height:18}} onClick={()=>setRulerColor(c)}/>))}
+                              <ToggleColorPicker value={rulerColor} onChange={setRulerColor}/>
+                            </div>
+                          </div>
+                          <select value={rulerType} onChange={e=>setRulerType(e.target.value)} className="sel-sm" style={{width:'100%',marginBottom:5}}>
+                            <option value="none">メモリなし</option><option value="cm">cm メモリ</option><option value="div">等分割</option>
+                          </select>
+                          {rulerType==='div'&&<div className="tool-size-row">
+                            <span className="tool-label">分割数</span>
+                            <input type="range" min="2" max="24" value={rulerDivisions} onChange={e=>setRulerDivisions(+e.target.value)} className="tool-slider"/>
+                            <span className="tool-size-val">{rulerDivisions}</span>
+                          </div>}
+                        </div>}
+                        {rulers.length===0&&activeTool!==TOOLS.RULER&&<p className="ruler-hint">定規ツールをONにしてドラッグ</p>}
+                      </div>
+                    </>
+                  })()}
+                </aside>
+              )
+              if(panelId==='layer')return(
+                <aside key="layer" className={`layer-sidebar ${panelCls}`} style={isLast?{flex:1,minHeight:0,overflow:'hidden'}:{maxHeight:'40vh',overflow:'hidden'}}>
+                  <div className="lp-header">
+                    <span className="panel-grab lp-grab" onMouseDown={e=>onPanelGrab(idx,e)} title="ドラッグして並べ替え"><GrabIcon/></span>
+                    <span className="lp-title">レイヤー</span>
+                    <div className="lp-actions">
+                      <button onClick={addLayer} title="新規">+</button>
+                      <button onClick={deleteLayer} disabled={drawingLayers.length<=1} title="削除">−</button>
+                      <button onClick={clearActive} title="クリア" className="btn-warn"><ClearLayerIcon/></button>
+                      <button onClick={mergeDown} title="下のレイヤーと結合" className="btn-merge" disabled={layers.filter(l=>!l.isPaper).findIndex(l=>l.id===activeLayerId)<=0}><MergeDownIcon/></button>
+                    </div>
+                  </div>
+                  {activeLayerId===PHOTO_ID&&(
+                    <div className="lp-opacity">
+                      <label>不透明度<span>{refOpacity}%</span></label>
+                      <input type="range" min="0" max="100" value={refOpacity} onChange={e=>setRefOpacity(+e.target.value)}/>
                     </div>
                   )}
-                  <div className="tool-size-row" style={{marginTop:6}}>
-                    <span className="tool-label">濃度</span>
-                    <input type="range" min="10" max="100" value={gridOpacity}
-                      onChange={e=>setGridOpacity(+e.target.value)} className="tool-slider"/>
-                    <span className="tool-size-val">{gridOpacity}%</span>
-                  </div>
-                </div>
-              </>}
-              {showRuler&&!hardMode&&(()=>{
-                const ar=rulers.find(r=>r.id===activeRulerId)
-                return<>
-                  <div className="pen-sidebar-hdr">
-                    定規
-                    {activeTool===TOOLS.RULER&&<span className="ruler-add-hint">ドラッグで追加</span>}
-                  </div>
-                  <div className="pen-sidebar-body">
-                    {/* 定規リスト */}
-                    {rulers.length>0&&<div className="ruler-list">
-                      {rulers.map((r,i)=>(
-                        <div key={r.id}
-                          className={`ruler-row${activeRulerId===r.id?' ruler-row--active':''}`}
-                          style={r.visible===false?{opacity:.55}:undefined}
-                          onClick={()=>{setActiveRulerId(r.id);if(activeRulerId!==r.id)setRulerSettingsOpen(false)}}>
-                          <span className="ruler-color-dot" style={{background:r.color}}/>
-                          <span className="ruler-row-label">
-                            {i+1}. {r.type==='none'?'線':r.type==='cm'?'cm':`÷${r.divisions}`}
-                          </span>
-                          {activeRulerId===r.id&&<button className="ruler-del-btn" style={{marginRight:1}} onClick={e=>{e.stopPropagation();setRulerSettingsOpen(v=>!v)}} title="設定">
-                            <span style={{display:'inline-block',transform:rulerSettingsOpen?'rotate(180deg)':'none',transition:'transform .15s'}}>∨</span>
-                          </button>}
-                          <button className="ruler-del-btn" style={{opacity:r.visible===false?.4:1}} onClick={e=>{e.stopPropagation();setRulers(rs=>rs.map(x=>x.id===r.id?{...x,visible:x.visible===false}:x))}} title={r.visible===false?'表示する':'非表示にする'}>
-                            {r.visible===false?<EyeOffIcon/>:<EyeIcon/>}
+                  {activeLayer&&!activeLayer.isPaper&&(
+                    <div className="lp-opacity">
+                      <label>不透明度<span>{activeLayer.opacity}%</span></label>
+                      <input type="range" min="0" max="100" value={activeLayer.opacity} onChange={e=>updLayer(activeLayerId,{opacity:+e.target.value})}/>
+                    </div>
+                  )}
+                  <div className="layer-list" ref={layerListRef}>
+                    {listItems.map((item,idx)=>{
+                      const isDrag=layerDragSrc===idx
+                      const isDrop=layerDropIdx===idx&&layerDragSrc!==null&&layerDropIdx!==layerDragSrc
+                      if(item.type==='photo')return(
+                        <div key="photo" className={`layer-row photo-layer-row${isDrag?' layer-dragging':''}${isDrop?' layer-drop-here':''}${activeLayerId===PHOTO_ID?' active':''}`}
+                          onMouseDown={e=>onLayerPointerDown(idx,e)} onTouchStart={e=>onLayerPointerDown(idx,e)}>
+                          <span className="vis-btn"><EyeIcon/></span>
+                          <div className="layer-thumb-ref"><img src={refImage} alt="" style={{opacity:refOpacity/100}}/></div>
+                          <span className="layer-name">参考画像</span>
+                        </div>
+                      )
+                      const layer=item.layer
+                      return(
+                        <div key={layer.id}
+                          className={`layer-row${layer.id===activeLayerId?' active':''}${layer.isPaper?' paper-row':''}${isDrag?' layer-dragging':''}${isDrop?' layer-drop-here':''}`}
+                          onMouseDown={e=>!layer.isPaper&&onLayerPointerDown(idx,e)}
+                          onTouchStart={e=>!layer.isPaper&&onLayerPointerDown(idx,e)}>
+                          <button className="vis-btn" onMouseDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();if(!layer.isPaper)updLayer(layer.id,{visible:!layer.visible})}}>
+                            {layer.visible?<EyeIcon/>:<EyeOffIcon/>}
                           </button>
-                          <button className="ruler-del-btn" onClick={e=>{
-                            e.stopPropagation()
-                            setRulers(rs=>rs.filter(x=>x.id!==r.id))
-                            if(activeRulerId===r.id)setActiveRulerId(null)
-                          }}>✕</button>
+                          <LayerThumb layerId={layer.id} layerCanvases={layerCanvases} rev={rev}/>
+                          <span className="layer-name">{layer.name}</span>
+                          <span className="layer-op">{layer.isPaper?'用紙':`${layer.opacity}%`}</span>
                         </div>
-                      ))}
-                    </div>}
-                    {/* 選択中定規の設定 */}
-                    {ar&&rulerSettingsOpen&&<div className="ruler-settings">
-                      <div className="ruler-settings-title">定規 {rulers.indexOf(ar)+1} の設定</div>
-                      <select value={ar.type}
-                        onChange={e=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,type:e.target.value}:r))}
-                        className="sel-sm" style={{width:'100%',marginBottom:5}}>
-                        <option value="none">メモリなし</option>
-                        <option value="cm">cm メモリ</option>
-                        <option value="div">等分割</option>
-                      </select>
-                      <div className="tool-size-row" style={{marginBottom:5,flexWrap:'wrap',gap:4}}>
-                        <span className="tool-label">色</span>
-                        <div style={{display:'flex',gap:3,alignItems:'center',flexWrap:'wrap'}}>
-                          {PRESET_COLORS.map(c=>(
-                            <button key={c} className={`swatch${ar.color===c?' sel':''}`}
-                              style={{background:c,width:18,height:18}}
-                              onClick={()=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,color:c}:r))}/>
-                          ))}
-                          <ToggleColorPicker value={ar.color}
-                            onChange={c=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,color:c}:r))}/>
-                        </div>
-                      </div>
-                      {ar.type==='div'&&<div className="tool-size-row">
-                        <span className="tool-label">分割数</span>
-                        <input type="range" min="2" max="24" value={ar.divisions}
-                          onChange={e=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,divisions:+e.target.value}:r))}
-                          className="tool-slider"/>
-                        <span className="tool-size-val">{ar.divisions}</span>
-                      </div>}
-                    </div>}
-                    {/* デフォルト（次の定規用）*/}
-                    {activeTool===TOOLS.RULER&&<div className="ruler-default-section">
-                      <div className="ruler-settings-title">次の定規</div>
-                      <div className="tool-size-row" style={{marginBottom:5,flexWrap:'wrap',gap:4}}>
-                        <span className="tool-label">色</span>
-                        <div style={{display:'flex',gap:3,alignItems:'center',flexWrap:'wrap'}}>
-                          {PRESET_COLORS.map(c=>(
-                            <button key={c} className={`swatch${rulerColor===c?' sel':''}`}
-                              style={{background:c,width:18,height:18}}
-                              onClick={()=>setRulerColor(c)}/>
-                          ))}
-                          <ToggleColorPicker value={rulerColor} onChange={setRulerColor}/>
-                        </div>
-                      </div>
-                      <select value={rulerType} onChange={e=>setRulerType(e.target.value)}
-                        className="sel-sm" style={{width:'100%',marginBottom:5}}>
-                        <option value="none">メモリなし</option>
-                        <option value="cm">cm メモリ</option>
-                        <option value="div">等分割</option>
-                      </select>
-                      {rulerType==='div'&&<div className="tool-size-row">
-                        <span className="tool-label">分割数</span>
-                        <input type="range" min="2" max="24" value={rulerDivisions}
-                          onChange={e=>setRulerDivisions(+e.target.value)} className="tool-slider"/>
-                        <span className="tool-size-val">{rulerDivisions}</span>
-                      </div>}
-                    </div>}
-                    {rulers.length===0&&activeTool!==TOOLS.RULER&&
-                      <p className="ruler-hint">定規ツールをONにしてドラッグ</p>}
+                      )
+                    })}
                   </div>
-                </>
-              })()}
-            </aside>
-            {/* ── レイヤーウィンドウ（下部・残スペース）── */}
-            <aside className="layer-sidebar">
-              <div className="lp-header">
-                <span className="lp-title">レイヤー</span>
-                <div className="lp-actions">
-                  <button onClick={addLayer} title="新規">+</button>
-                  <button onClick={deleteLayer} disabled={drawingLayers.length<=1} title="削除">−</button>
-                  <button onClick={clearActive} title="クリア" className="btn-warn"><ClearLayerIcon/></button>
-                  <button onClick={mergeDown} title="下のレイヤーと結合" className="btn-merge" disabled={layers.filter(l=>!l.isPaper).findIndex(l=>l.id===activeLayerId)<=0}><MergeDownIcon/></button>
-                </div>
-              </div>
-              {activeLayerId===PHOTO_ID&&(
-                <div className="lp-opacity">
-                  <label>不透明度<span>{refOpacity}%</span></label>
-                  <input type="range" min="0" max="100" value={refOpacity} onChange={e=>setRefOpacity(+e.target.value)}/>
-                </div>
-              )}
-              {activeLayer&&!activeLayer.isPaper&&(
-                <div className="lp-opacity">
-                  <label>不透明度<span>{activeLayer.opacity}%</span></label>
-                  <input type="range" min="0" max="100" value={activeLayer.opacity} onChange={e=>updLayer(activeLayerId,{opacity:+e.target.value})}/>
-                </div>
-              )}
-              <div className="layer-list" ref={layerListRef}>
-                {listItems.map((item,idx)=>{
-                  const isDrag = layerDragSrc===idx
-                  const isDrop = layerDropIdx===idx && layerDragSrc!==null && layerDropIdx!==layerDragSrc
-                  if(item.type==='photo')return(
-                    <div key="photo"
-                      className={`layer-row photo-layer-row${isDrag?' layer-dragging':''}${isDrop?' layer-drop-here':''}${activeLayerId===PHOTO_ID?' active':''}`}
-                      onMouseDown={e=>onLayerPointerDown(idx,e)}
-                      onTouchStart={e=>onLayerPointerDown(idx,e)}>
-                      <span className="vis-btn"><EyeIcon/></span>
-                      <div className="layer-thumb-ref"><img src={refImage} alt="" style={{opacity:refOpacity/100}}/></div>
-                      <span className="layer-name">参考画像</span>
-                    </div>
-                  )
-                  const layer=item.layer
-                  return(
-                    <div key={layer.id}
-                      className={`layer-row${layer.id===activeLayerId?' active':''}${layer.isPaper?' paper-row':''}${isDrag?' layer-dragging':''}${isDrop?' layer-drop-here':''}`}
-                      onMouseDown={e=>!layer.isPaper&&onLayerPointerDown(idx,e)}
-                      onTouchStart={e=>!layer.isPaper&&onLayerPointerDown(idx,e)}>
-                      <button className="vis-btn" onMouseDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();if(!layer.isPaper)updLayer(layer.id,{visible:!layer.visible})}}>
-                        {layer.visible?<EyeIcon/>:<EyeOffIcon/>}
-                      </button>
-                      <LayerThumb layerId={layer.id} layerCanvases={layerCanvases} rev={rev}/>
-                      <span className="layer-name">{layer.name}</span>
-                      <span className="layer-op">{layer.isPaper?'用紙':`${layer.opacity}%`}</span>
-                    </div>
-                  )
-                })}
-              </div>
-            </aside>
+                </aside>
+              )
+              return null
+            })}
           </div>
         )}
       </div>
@@ -2851,6 +2852,9 @@ function UndoIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="
 function ClearLayerIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="6" x2="12" y2="2"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="7.76" y1="16.24" x2="4.93" y2="19.07"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="7.76" y1="7.76" x2="4.93" y2="4.93"/></svg>}
 function FlipHIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="4" x2="12" y2="20" strokeDasharray="2 2.5"/><path d="M8 8L3 12L8 16"/><path d="M16 8L21 12L16 16"/></svg>}
 function FlipBothIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M7 5L3 12L7 19"/><path d="M17 5L21 12L17 19"/><line x1="12" y1="4" x2="12" y2="20" strokeDasharray="2 2.5"/></svg>}
+function ChevronLeftIcon(){return<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>}
+function ChevronRightIcon(){return<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>}
+function GrabIcon(){return<svg width="9" height="13" viewBox="0 0 9 13" fill="currentColor"><circle cx="2.5" cy="2" r="1.2"/><circle cx="6.5" cy="2" r="1.2"/><circle cx="2.5" cy="6.5" r="1.2"/><circle cx="6.5" cy="6.5" r="1.2"/><circle cx="2.5" cy="11" r="1.2"/><circle cx="6.5" cy="11" r="1.2"/></svg>}
 function MergeDownIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="9" width="13" height="13" rx="2"/><rect x="9" y="2" width="13" height="13" rx="2"/><line x1="15" y1="9" x2="9" y2="15"/><polyline points="9,12 9,15 12,15"/></svg>}
 function ResetIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>}
 function RedoIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 014-4h12"/></svg>}
