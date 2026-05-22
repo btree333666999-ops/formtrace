@@ -1052,7 +1052,18 @@ export default function App() {
           return
         }
       }
-      setViewZoom(z=>Math.round(Math.min(400,Math.max(20,z*Math.pow(0.999,e.deltaY)))))
+      // カーソル位置を中心にズーム
+      const rect=el.getBoundingClientRect()
+      const mx=e.clientX-rect.left-rect.width/2
+      const my=e.clientY-rect.top-rect.height/2
+      const curZ=viewZoomRef.current/100
+      const newZRounded=Math.round(Math.min(400,Math.max(20,curZ*Math.pow(0.999,e.deltaY)*100)))
+      const newZ=newZRounded/100
+      const cx=(mx-panOffsetRef.current.x)/curZ
+      const cy=(my-panOffsetRef.current.y)/curZ
+      const npx=mx-cx*newZ,npy=my-cy*newZ
+      panOffsetRef.current={x:npx,y:npy};setPanOffset({x:npx,y:npy})
+      setViewZoom(newZRounded)
     }
     const onMouseDown=e=>{
       if(e.button===1){e.preventDefault();setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}
@@ -2331,6 +2342,7 @@ export default function App() {
             <input type="range" min="20" max="400" value={viewZoom} onChange={e=>setViewZoom(+e.target.value)} className="zoom-slider" title="表示サイズ (二本指スクロールでズーム)"/>
             <span className="bb-val">{viewZoom}%</span>
             {(viewZoom!==100||panOffset.x||panOffset.y)&&<button className="bb-reset-btn" onClick={()=>{setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}} title="表示位置・ズームをリセット">⟳</button>}
+            <button className={`bb-crop-btn${flipH?' bb-crop-reset':''}`} onClick={()=>setFlipH(v=>!v)} title="左右反転"><FlipHIcon/></button>
             <div style={{flex:1}}/>
             {(refImage||practiceMode)&&(practiceMode?practiceOverlay:refOverlay)&&<>
               <input type="range" min="0" max="100"
@@ -2791,7 +2803,8 @@ function drawSelPath(ctx,sel){
 function TB({label,active,onClick,children}){return <button className={`tool-btn${active?' active':''}`} onClick={onClick} title={label}>{children}</button>}
 function MenuIcon(){return<svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="2" y1="5" x2="18" y2="5"/><line x1="2" y1="10" x2="18" y2="10"/><line x1="2" y1="15" x2="18" y2="15"/></svg>}
 function UndoIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 00-4-4H4"/></svg>}
-function ClearLayerIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="1" x2="12" y2="8"/><line x1="12" y1="16" x2="12" y2="23"/><line x1="1" y1="12" x2="8" y2="12"/><line x1="16" y1="12" x2="23" y2="12"/><line x1="4.2" y1="4.2" x2="9.2" y2="9.2"/><line x1="14.8" y1="14.8" x2="19.8" y2="19.8"/><line x1="19.8" y1="4.2" x2="14.8" y2="9.2"/><line x1="9.2" y1="14.8" x2="4.2" y2="19.8"/><circle cx="12" cy="12" r="4"/></svg>}
+function ClearLayerIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="6" x2="12" y2="2"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="7.76" y1="16.24" x2="4.93" y2="19.07"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="7.76" y1="7.76" x2="4.93" y2="4.93"/></svg>}
+function FlipHIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="4" x2="12" y2="20" strokeDasharray="2 2.5"/><path d="M8 8L3 12L8 16"/><path d="M16 8L21 12L16 16"/></svg>}
 function MergeDownIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="13" y="2" width="9" height="9" rx="1"/><rect x="2" y="13" width="9" height="9" rx="1"/><line x1="13" y1="11" x2="11" y2="13"/><polyline points="13,13 11,13 11,11"/></svg>}
 function ResetIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>}
 function RedoIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 014-4h12"/></svg>}
