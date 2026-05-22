@@ -692,6 +692,7 @@ export default function App() {
   const [flipDraw,setFlipDraw] = useState(false)
   const [panelOrder,setPanelOrder] = useState(['nav','tool','layer'])
   const [sidebarLeft,setSidebarLeft] = useState(false)
+  const [customizeMode,setCustomizeMode] = useState(false)
   const [panelDragSrc,setPanelDragSrc] = useState(null)
   const [panelDropIdx,setPanelDropIdx] = useState(null)
 
@@ -2280,6 +2281,7 @@ export default function App() {
       <div className="main">
         <div className="content">
           <div className="draw-area" ref={drawAreaRef}>
+            {customizeMode&&<div className="customize-canvas-block" title="カスタマイズモード中は描画できません"><span>カスタマイズ中</span></div>}
             <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
               <div style={{position:'relative',flexShrink:0,
                 width:dispSize.w||cvW,height:dispSize.h||cvH,
@@ -2442,22 +2444,30 @@ export default function App() {
 
         {showLayerPanel&&(
           <div className={`sidebar-col${sidebarLeft?' sidebar-col--left':''}`}>
-            {/* ── サイドバー移動バー ─── */}
-            <div className="sidebar-top-ctrl">
+            {/* ── サイドバー操作バー ─── */}
+            <div className={`sidebar-top-ctrl${customizeMode?' sidebar-top-ctrl--active':''}`}>
+              <button className={`nav-icon-btn customize-toggle${customizeMode?' active':''}`}
+                onClick={()=>setCustomizeMode(v=>!v)}
+                title={customizeMode?'カスタマイズ終了':'パネル配置をカスタマイズ'}>
+                {customizeMode?<span className="customize-done-label">完了</span>:<LayoutIcon/>}
+              </button>
+              <div style={{flex:1}}/>
               <button className="nav-icon-btn" onClick={()=>setSidebarLeft(v=>!v)} title={sidebarLeft?"右に移動":"左に移動"}>
                 {sidebarLeft?<ChevronRightIcon/>:<ChevronLeftIcon/>}
               </button>
             </div>
+            {customizeMode&&<div className="customize-mode-banner">⠿ ドラッグしてパネルを並べ替え</div>}
             {panelOrder.map((panelId,idx)=>{
               const isDragging=panelDragSrc===idx
               const isDropTarget=panelDropIdx===idx&&panelDragSrc!==null&&panelDragSrc!==idx
               const isLast=idx===panelOrder.length-1
               const panelCls=`panel-section${isDragging?' panel-dragging':''}${isDropTarget?' panel-drop-here':''}`
-              const grab=<span className="panel-grab" onMouseDown={e=>onPanelGrab(idx,e)} title="ドラッグして並べ替え"><GrabIcon/></span>
+              const grabBar=customizeMode&&<div className="panel-grab-full" onMouseDown={e=>onPanelGrab(idx,e)}><GrabIcon/><span>ドラッグして移動</span></div>
               if(panelId==='nav')return(
                 <div key="nav" className={`nav-sidebar ${panelCls}`} style={isLast?{flex:1,overflow:'hidden'}:{}}>
+                  {grabBar}
                   <div className="pen-sidebar-hdr nav-hdr">
-                    {grab}<span>ナビゲーター</span>
+                    <span>ナビゲーター</span>
                     <div className="nav-hdr-btns">
                       <button className={`nav-icon-btn${flipPhoto?' active':''}`} onClick={()=>setFlipPhoto(v=>!v)} title="参考画像を左右反転"><FlipHIcon/></button>
                       <button className={`nav-icon-btn${flipDraw?' active':''}`} onClick={()=>setFlipDraw(v=>!v)} title="描画エリアを左右反転"><FlipHIcon/></button>
@@ -2473,7 +2483,7 @@ export default function App() {
               )
               if(panelId==='tool')return(
                 <aside key="tool" className={`pen-sidebar ${panelCls}`} style={isLast?{flex:1,overflowY:'auto'}:{}}>
-                  <div className="panel-grab-bar" onMouseDown={e=>onPanelGrab(idx,e)}><GrabIcon/></div>
+                  {grabBar}
                   {(activeTool===TOOLS.PEN)&&<>
                     <div className="pen-sidebar-hdr">ペン設定</div>
                     <div className="pen-sidebar-body tool-body">
@@ -2599,8 +2609,8 @@ export default function App() {
               )
               if(panelId==='layer')return(
                 <aside key="layer" className={`layer-sidebar ${panelCls}`} style={isLast?{flex:1,minHeight:0,overflow:'hidden'}:{maxHeight:'40vh',overflow:'hidden'}}>
+                  {grabBar}
                   <div className="lp-header">
-                    <span className="panel-grab lp-grab" onMouseDown={e=>onPanelGrab(idx,e)} title="ドラッグして並べ替え"><GrabIcon/></span>
                     <span className="lp-title">レイヤー</span>
                     <div className="lp-actions">
                       <button onClick={addLayer} title="新規">+</button>
@@ -2853,6 +2863,7 @@ function ClearLayerIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" 
 function FlipHIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="4" x2="12" y2="20" strokeDasharray="2 2.5"/><path d="M8 8L3 12L8 16"/><path d="M16 8L21 12L16 16"/></svg>}
 function FlipBothIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M7 5L3 12L7 19"/><path d="M17 5L21 12L17 19"/><line x1="12" y1="4" x2="12" y2="20" strokeDasharray="2 2.5"/></svg>}
 function ChevronLeftIcon(){return<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>}
+function LayoutIcon(){return<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>}
 function ChevronRightIcon(){return<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>}
 function GrabIcon(){return<svg width="9" height="13" viewBox="0 0 9 13" fill="currentColor"><circle cx="2.5" cy="2" r="1.2"/><circle cx="6.5" cy="2" r="1.2"/><circle cx="2.5" cy="6.5" r="1.2"/><circle cx="6.5" cy="6.5" r="1.2"/><circle cx="2.5" cy="11" r="1.2"/><circle cx="6.5" cy="11" r="1.2"/></svg>}
 function MergeDownIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="9" width="13" height="13" rx="2"/><rect x="9" y="2" width="13" height="13" rx="2"/><line x1="15" y1="9" x2="9" y2="15"/><polyline points="9,12 9,15 12,15"/></svg>}

@@ -713,33 +713,58 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
 
 /* ── サイドバー操作バー ── */
 .sidebar-top-ctrl {
-  display: flex; justify-content: flex-end;
-  padding: 2px 3px;
+  display: flex; align-items: center;
+  padding: 2px 4px; gap: 2px;
   background: #0e0e0e;
   border-bottom: 1px solid #222;
   flex-shrink: 0;
+  transition: background .2s;
+}
+.sidebar-top-ctrl--active { background: #1a2030; border-bottom-color: var(--accent); }
+.customize-toggle { font-size: 10px; }
+.customize-done-label { font-size: 11px; font-weight: 700; color: var(--accent); letter-spacing: .5px; }
+.customize-mode-banner {
+  background: rgba(77,179,255,.13);
+  color: #6ac4ff;
+  font-size: 10px; font-weight: 600; letter-spacing: .5px;
+  text-align: center; padding: 5px 8px;
+  border-bottom: 1px solid rgba(77,179,255,.25);
+  flex-shrink: 0; user-select: none;
 }
 
 /* ── パネルドラッグ ── */
-.panel-section { position: relative; transition: opacity .15s; }
-.panel-dragging { opacity: 0.45; }
-.panel-drop-here { box-shadow: inset 0 2px 0 var(--accent); }
-.panel-grab {
-  cursor: grab; color: #555; padding: 0 5px 0 0;
-  display: inline-flex; align-items: center; flex-shrink: 0;
-  user-select: none;
+.panel-section { position: relative; transition: opacity .15s; flex-shrink: 0; }
+.panel-section:last-child { flex: 1; min-height: 0; overflow: hidden; flex-shrink: 1; }
+.panel-dragging { opacity: 0.35; pointer-events: none; }
+.panel-drop-here { position: relative; }
+.panel-drop-here::before {
+  content: ''; position: absolute; top: -2px; left: 6px; right: 6px;
+  height: 3px; background: var(--accent); border-radius: 2px; z-index: 20;
+  box-shadow: 0 0 6px var(--accent);
 }
-.panel-grab:hover { color: #aaa; }
-.panel-grab:active { cursor: grabbing; }
-.panel-grab-bar {
+.panel-grab-full {
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 12px;
+  background: linear-gradient(135deg,#1a2535,#1e2a3a);
+  border-bottom: 1px solid rgba(77,179,255,.3);
+  cursor: grab; color: #7ab8e8; font-size: 11px; font-weight: 600;
+  user-select: none; flex-shrink: 0; letter-spacing: .4px;
+}
+.panel-grab-full:hover { background: linear-gradient(135deg,#1e2d44,#243347); color: #a0d0ff; }
+.panel-grab-full:active { cursor: grabbing; }
+
+/* ── カスタマイズ中オーバーレイ ── */
+.customize-canvas-block {
+  position: absolute; inset: 0; z-index: 100;
+  background: rgba(0,0,0,.35);
   display: flex; align-items: center; justify-content: center;
-  padding: 3px 0; background: #0e0e0e;
-  cursor: grab; color: #555; border-bottom: 1px solid #1a1a1a;
-  user-select: none; flex-shrink: 0;
+  cursor: not-allowed; pointer-events: all;
 }
-.panel-grab-bar:hover { color: #aaa; background: #161616; }
-.panel-grab-bar:active { cursor: grabbing; }
-.lp-grab { margin-right: 2px; }
+.customize-canvas-block span {
+  background: rgba(0,0,0,.7); color: #7ab8e8;
+  font-size: 13px; font-weight: 600; letter-spacing: 1px;
+  padding: 8px 18px; border-radius: 8px; border: 1px solid rgba(77,179,255,.3);
+}
 /* コンパクトスライダー行 */
 .tool-body { padding: 5px 8px; }
 .tool-size-row {
