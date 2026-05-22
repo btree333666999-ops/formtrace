@@ -494,23 +494,23 @@ function ToggleColorPicker({value,onChange,width=36,height=24}){
 }
 
 // ── RulerOverlay ──────────────────────────────────────────────────
-function RulerOverlay({w,h,rulers=[],activeRulerId=null}){
+function RulerOverlay({w,h,rulers=[],activeRulerId=null,scale=1}){
   const ref=useRef(null)
   useEffect(()=>{
     const c=ref.current;if(!c)return
     const ctx=c.getContext('2d');ctx.clearRect(0,0,w,h)
+    // s = canvas pixels per CSS pixel → multiply all "visual" sizes by s
+    const s=scale
     rulers.forEach(ruler=>{
+      if(ruler.visible===false)return
       const{x1,y1,x2,y2,type='div',divisions=8,color='#2864ff',id}=ruler
       const dx=x2-x1,dy=y2-y1,len=Math.sqrt(dx*dx+dy*dy)
       if(len<4)return
       const isActive=id===activeRulerId
       const ux=dx/len,uy=dy/len
       const nx=-uy,ny=ux
-      // parse color to rgba
       const alpha=isActive?0.95:0.75
       const alphaL=isActive?0.75:0.55
-      const lw=1.5
-      // helper: hex/named color -> rgba string
       const toRgba=(col,a)=>{
         const tmp=document.createElement('canvas');tmp.width=1;tmp.height=1
         const t=tmp.getContext('2d');t.fillStyle=col;t.fillRect(0,0,1,1)
@@ -519,19 +519,13 @@ function RulerOverlay({w,h,rulers=[],activeRulerId=null}){
       }
       const C=toRgba(color,alpha)
       const CL=toRgba(color,alphaL)
-      // main line
-      ctx.strokeStyle=C;ctx.lineWidth=lw;ctx.setLineDash([])
+      // main line — always 0.8 CSS px
+      ctx.strokeStyle=C;ctx.lineWidth=0.8*s;ctx.setLineDash([])
       ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke()
-      // endpoint handles
-      const hR=3
-      ;[[x1,y1],[x2,y2]].forEach(([px,py])=>{
-        ctx.beginPath();ctx.arc(px,py,hR,0,Math.PI*2)
-        ctx.fillStyle='#fff';ctx.fill()
-        ctx.strokeStyle=C;ctx.lineWidth=1.5;ctx.stroke()
-      })
-      // tick marks
-      const TICK=10
-      ctx.lineWidth=1.1
+      // tick marks — always 10 CSS px height, 0.7 CSS px wide
+      const TICK=10*s
+      ctx.lineWidth=0.7*s
+      const fs=Math.max(1,Math.round(9*s))
       const tick=(d,h2,label)=>{
         const px=x1+ux*d,py=y1+uy*d
         ctx.beginPath()
@@ -540,8 +534,8 @@ function RulerOverlay({w,h,rulers=[],activeRulerId=null}){
         ctx.strokeStyle=CL;ctx.stroke()
         if(label!=null){
           ctx.fillStyle=C
-          ctx.font=`9px sans-serif`
-          ctx.fillText(label,px+nx*(TICK+5)-ctx.measureText(label).width/2,py+ny*(TICK+5)+4)
+          ctx.font=`${fs}px sans-serif`
+          ctx.fillText(label,px+nx*(TICK+5*s)-ctx.measureText(label).width/2,py+ny*(TICK+5*s)+4*s)
         }
       }
       if(type==='cm'){
@@ -556,8 +550,9 @@ function RulerOverlay({w,h,rulers=[],activeRulerId=null}){
         }
         const totalCm=(len/ppc).toFixed(1)
         const mx=(x1+x2)/2,my=(y1+y2)/2
-        ctx.font=`10px sans-serif`;ctx.fillStyle=C
-        ctx.fillText(`${totalCm}cm`,mx+nx*22-ctx.measureText(`${totalCm}cm`).width/2,my+ny*22+4)
+        const fsL=Math.max(1,Math.round(10*s))
+        ctx.font=`${fsL}px sans-serif`;ctx.fillStyle=C
+        ctx.fillText(`${totalCm}cm`,mx+nx*22*s-ctx.measureText(`${totalCm}cm`).width/2,my+ny*22*s+4*s)
       } else if(type==='div'){
         const n=divisions
         for(let i=0;i<=n;i++){
@@ -565,14 +560,13 @@ function RulerOverlay({w,h,rulers=[],activeRulerId=null}){
           const isEnd=i===0||i===n
           tick(d,isEnd?TICK*1.1:TICK*.85,(!isEnd&&i>0)?`${i}`:null)
         }
-        ctx.font=`9px sans-serif`;ctx.fillStyle=C
-        ctx.fillText('0',x1+nx*(TICK+5)-4,y1+ny*(TICK+5)+4)
-        ctx.fillText(`${n}`,x2+nx*(TICK+5)-4,y2+ny*(TICK+5)+4)
+        ctx.font=`${fs}px sans-serif`;ctx.fillStyle=C
+        ctx.fillText('0',x1+nx*(TICK+5*s)-4*s,y1+ny*(TICK+5*s)+4*s)
+        ctx.fillText(`${n}`,x2+nx*(TICK+5*s)-4*s,y2+ny*(TICK+5*s)+4*s)
       }
-      // type==='none' -> line and handles only
       ctx.globalAlpha=1
     })
-  },[w,h,rulers,activeRulerId])
+  },[w,h,rulers,activeRulerId,scale])
   return <canvas ref={ref} width={w} height={h} className="ruler-overlay"/>
 }
 
@@ -647,6 +641,7 @@ export default function App() {
   const [showLayerPanel,setShowLayerPanel] = useState(true)
   const [rev,setRev]                   = useState(0)
   const [showGrid,setShowGrid]         = useState(false)
+  const [gridVisible,setGridVisible]   = useState(true)
   const [gridSize,setGridSize]         = useState(100)
   const [gridOpacity,setGridOpacity]   = useState(40)
   const [showRuler,setShowRuler]       = useState(false)
@@ -655,6 +650,7 @@ export default function App() {
   const [rulerColor,setRulerColor]     = useState('#2864ff')
   const [rulers,setRulers]             = useState([])
   const [activeRulerId,setActiveRulerId] = useState(null)
+  const [rulerSettingsOpen,setRulerSettingsOpen] = useState(false)
   const [urlInput,setUrlInput]         = useState('')
   const [urlError,setUrlError]         = useState('')
   const [xf,setXf]                     = useState(null)
@@ -708,8 +704,13 @@ export default function App() {
   const orbitDragStart    = useRef(null)
   const placingRulerIdRef  = useRef(null)
   const placingRulerStartRef = useRef(null)
-  const drawAreaRef       = useRef(null)
-  const cursorDivRef      = useRef(null)
+  const drawAreaRef         = useRef(null)
+  const cursorDivRef        = useRef(null)
+  const globalPtrClientRef  = useRef({x:0,y:0})
+  const navigatorRef        = useRef(null)
+  const viewZoomRef         = useRef(100)
+  const dispSizeRef         = useRef({w:0,h:0})
+  const navDragRef          = useRef(false)
   const [isCursorOnCanvas, setIsCursorOnCanvas] = useState(false)
 
   // layer drag-to-reorder
@@ -758,7 +759,9 @@ export default function App() {
   const penShiftSnapRef = useRef(null)
 
   const S = useRef({})
-  S.current = {activeTool,penColor,penSize,eraserSize,activeLayerId,refOpacity,layers,showGrid,gridSize,gridOpacity,practiceMode,practiceDrawMode,practiceStyle,practiceObject,rulerType,rulerDivisions,rulerColor,hardMode,practiceOrbit,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity}
+  S.current = {activeTool,penColor,penSize,eraserSize,activeLayerId,refOpacity,layers,showGrid,gridVisible,gridSize,gridOpacity,practiceMode,practiceDrawMode,practiceStyle,practiceObject,rulerType,rulerDivisions,rulerColor,hardMode,practiceOrbit,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity}
+  viewZoomRef.current = viewZoom
+  dispSizeRef.current = dispSize
   shortcutsRef.current = shortcuts
   scLearningRef.current = scLearning
 
@@ -831,6 +834,13 @@ export default function App() {
     return()=>ro.disconnect()
   },[cvW,cvH])
 
+  // グローバルポインター位置追跡（キャンバス外での最終座標を記録）
+  useEffect(()=>{
+    const track=e=>{globalPtrClientRef.current={x:e.clientX,y:e.clientY}}
+    window.addEventListener('pointermove',track,{passive:true})
+    return()=>window.removeEventListener('pointermove',track)
+  },[])
+
   // ── History ───────────────────────────────────────────────────
   const saveHist = useCallback(()=>{
     const key=String(S.current.activeLayerId)
@@ -846,6 +856,33 @@ export default function App() {
     lastHistKey.current=key
   },[])
 
+  // ── Navigator update ─────────────────────────────────────────
+  const navUpdate=useCallback(()=>{
+    const nav=navigatorRef.current,disp=displayRef.current
+    const {w:dsw,h:dsh}=dispSizeRef.current
+    if(!nav||!disp||!dsw||!nav.width)return
+    const nw=nav.width,nh=nav.height
+    const nc=nav.getContext('2d')
+    nc.clearRect(0,0,nw,nh)
+    nc.drawImage(disp,0,0,nw,nh)
+    const el=drawAreaRef.current;if(!el)return
+    const daw=el.offsetWidth,dah=el.offsetHeight
+    const zoom=viewZoomRef.current/100
+    const px=panOffsetRef.current.x,py=panOffsetRef.current.y
+    const ns=nw/dsw
+    const cl=daw/2+px-dsw*zoom/2,ct=dah/2+py-dsh*zoom/2
+    const vx0=(-cl)/zoom,vy0=(-ct)/zoom
+    const vx1=(daw-cl)/zoom,vy1=(dah-ct)/zoom
+    const rx0=Math.max(0,vx0)*ns,ry0=Math.max(0,vy0)*ns
+    const rx1=Math.min(dsw,vx1)*ns,ry1=Math.min(dsh,vy1)*ns
+    if(rx1>rx0&&ry1>ry0){
+      nc.strokeStyle='#ff4444';nc.lineWidth=1.5
+      nc.strokeRect(rx0+.5,ry0+.5,Math.max(1,rx1-rx0-1),Math.max(1,ry1-ry0-1))
+    }
+  },[])
+  const navUpdateRef=useRef(navUpdate)
+  navUpdateRef.current=navUpdate
+
   // ── Composite ─────────────────────────────────────────────────
   const comp=useCallback(()=>{
     const disp=displayRef.current;if(!disp)return
@@ -853,7 +890,7 @@ export default function App() {
     const ctx=disp.getContext('2d')
     ctx.clearRect(0,0,cw,ch)
     ctx.fillStyle='#fff';ctx.fillRect(0,0,cw,ch)
-    const {practiceMode,practiceStyle,practiceObject,refOpacity,layers,showGrid,gridSize,gridOpacity,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity}=S.current
+    const {practiceMode,practiceStyle,practiceObject,refOpacity,layers,showGrid,gridVisible,gridSize,gridOpacity,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity}=S.current
     // Left half: photo or practice
     if(practiceMode){
       if(practiceCategory==='flat'){
@@ -908,7 +945,7 @@ export default function App() {
       ctx.globalAlpha=l.opacity/100;ctx.drawImage(lc,0,0);ctx.globalAlpha=1
     }
     // Grid — drawn independently for each half
-    if(showGrid){
+    if(showGrid&&gridVisible){
       ctx.globalAlpha=gridOpacity/100;ctx.strokeStyle='#3366ff';ctx.setLineDash([])
       const drawHalfGrid=(x0,hw)=>{
         ctx.save();ctx.beginPath();ctx.rect(x0,0,hw,ch);ctx.clip()
@@ -954,11 +991,23 @@ export default function App() {
         ctx.stroke();ctx.restore()
       }
     }
+    // Navigator update
+    navUpdateRef.current?.()
   },[])
 
   useEffect(()=>{compRef.current=comp},[comp])
   useEffect(()=>{comp()},[comp,rev])
-  useEffect(()=>{comp()},[comp,showGrid,gridSize,gridOpacity])
+  // Navigator: panOffset/viewZoom変化時も再描画
+  useEffect(()=>{navUpdate()},[navUpdate,viewZoom,panOffset,dispSize])
+  // Navigator canvas サイズ調整
+  useEffect(()=>{
+    const nav=navigatorRef.current;if(!nav)return
+    const p=nav.parentElement;if(!p)return
+    const w=p.clientWidth;if(!w)return
+    const h=Math.round(w*cvH/cvW)
+    if(nav.width!==w||nav.height!==h){nav.width=w;nav.height=h;navUpdate()}
+  },[cvW,cvH,navUpdate,dispSize])
+  useEffect(()=>{comp()},[comp,showGrid,gridVisible,gridSize,gridOpacity])
   useEffect(()=>{comp()},[comp,refOpacity])
   useEffect(()=>{comp()},[comp,layers])
   useEffect(()=>{comp()},[comp,practiceStyle,practiceMode,practiceObject,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity])
@@ -1084,6 +1133,23 @@ export default function App() {
     window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)
   },[])
 
+  // ── Navigator pointer handlers ─────────────────────────────────
+  const navApply=e=>{
+    const nav=navigatorRef.current;if(!nav)return
+    const {w:dsw,h:dsh}=dispSizeRef.current;if(!dsw||!nav.width)return
+    const r=nav.getBoundingClientRect()
+    const nx=(e.clientX-r.left)*(nav.width/r.width)
+    const ny=(e.clientY-r.top)*(nav.height/r.height)
+    const ns=nav.width/dsw
+    const cx=nx/ns,cy=ny/ns
+    const zoom=viewZoomRef.current/100
+    const px=(dsw/2-cx)*zoom,py=(dsh/2-cy)*zoom
+    panOffsetRef.current={x:px,y:py};setPanOffset({x:px,y:py})
+  }
+  const onNavDown=e=>{e.currentTarget.setPointerCapture(e.pointerId);navDragRef.current=true;navApply(e)}
+  const onNavMove=e=>{if(navDragRef.current)navApply(e)}
+  const onNavUp=()=>{navDragRef.current=false}
+
   const makeToolButton=useCallback(id=>{
     switch(id){
       case'pen':return<TB label="ペン" active={activeTool===TOOLS.PEN} onClick={()=>setActiveTool(TOOLS.PEN)}><PenIcon/></TB>
@@ -1092,7 +1158,7 @@ export default function App() {
       case'move':return<TB label="レイヤー移動" active={activeTool===TOOLS.MOVE} onClick={()=>setActiveTool(TOOLS.MOVE)}><MoveIcon/></TB>
       case'line':return<TB label="直線" active={activeTool===TOOLS.LINE} onClick={()=>setActiveTool(TOOLS.LINE)}><LineIcon/></TB>
       case'ruler':return<TB label="定規" active={showRuler} onClick={()=>{if(showRuler){setShowRuler(false);setRulers([]);setActiveRulerId(null);placingRulerIdRef.current=null;placingRulerStartRef.current=null}else{setShowRuler(true);setActiveTool(TOOLS.RULER)}}}><RulerIcon/></TB>
-      case'grid':return<TB label="マス目" active={showGrid} onClick={()=>setShowGrid(v=>!v)}><GridIcon/></TB>
+      case'grid':return<TB label="マス目" active={showGrid} onClick={()=>{setShowGrid(v=>{if(!v)setGridVisible(true);return !v})}}><GridIcon/></TB>
       case'hand':return<TB label="手のひら移動 (H)" active={activeTool===TOOLS.HAND} onClick={()=>setActiveTool(TOOLS.HAND)}><HandIcon/></TB>
       default:return null
     }
@@ -1140,7 +1206,7 @@ export default function App() {
         // 1st tap: set start point
         const nid=Date.now()
         const{rulerType:rt,rulerDivisions:rd,rulerColor:rc}=S.current
-        setRulers(rs=>[...rs,{id:nid,x1:pt.x,y1:pt.y,x2:pt.x,y2:pt.y,type:rt,divisions:rd,color:rc}])
+        setRulers(rs=>[...rs,{id:nid,x1:pt.x,y1:pt.y,x2:pt.x,y2:pt.y,type:rt,divisions:rd,color:rc,visible:true}])
         setActiveRulerId(nid);placingRulerIdRef.current=nid;placingRulerStartRef.current={x:pt.x,y:pt.y}
       }
       return
@@ -1197,7 +1263,20 @@ export default function App() {
         d.style.left=e.clientX+'px';d.style.top=e.clientY+'px'
         d.style.width=(radius*2)+'px';d.style.height=(radius*2)+'px'
         const cross=d.querySelector('.cur-cross')
-        if(cross)cross.style.opacity=radius<5?'1':'0'
+        if(cross){
+          const showCross=sz<=5
+          cross.style.opacity=showCross?'1':'0'
+          if(showCross){
+            const gap=Math.ceil(radius)+2,end=gap+7
+            const ls=cross.querySelectorAll('line')
+            if(ls.length>=4){
+              ls[0].setAttribute('y1',-end);ls[0].setAttribute('y2',-gap)
+              ls[1].setAttribute('y1',gap);ls[1].setAttribute('y2',end)
+              ls[2].setAttribute('x1',-end);ls[2].setAttribute('x2',-gap)
+              ls[3].setAttribute('x1',gap);ls[3].setAttribute('x2',end)
+            }
+          }
+        }
       }
     }
     // Orbit drag
@@ -1359,7 +1438,19 @@ export default function App() {
     const ctx2=draw?.getContext('2d');if(ctx2)ctx2.globalCompositeOperation='source-over'
     moveSnap.current=null;lastPt.current=null
   }
-  const onPointerEnter=e=>{setIsCursorOnCanvas(true);if(!e.buttons||isDrawing.current)return;onPointerDown(e)}
+  const onPointerEnter=e=>{
+    setIsCursorOnCanvas(true)
+    if(!e.buttons||isDrawing.current)return
+    onPointerDown(e)
+    // キャンバス外の直前座標を始点に上書きし、エッジの隙間をなくす
+    const at=S.current.activeTool
+    if((at===TOOLS.PEN||at===TOOLS.ERASER)&&displayRef.current){
+      const r=displayRef.current.getBoundingClientRect()
+      const{w:cw,h:ch}=cvRef.current
+      const gp=globalPtrClientRef.current
+      lastPt.current={x:(gp.x-r.left)*(cw/r.width),y:(gp.y-r.top)*(ch/r.height)}
+    }
+  }
   const onPointerLeave=()=>setIsCursorOnCanvas(false)
 
   // ── Selection helpers ─────────────────────────────────────────
@@ -1480,7 +1571,7 @@ export default function App() {
         if(activeTool===TOOLS.RULER){setShowRuler(false);setRulers([]);setActiveRulerId(null)}
         else{setShowRuler(true);setActiveTool(TOOLS.RULER)}
       }
-      else if(k===sc.grid){setShowGrid(v=>!v)}
+      else if(k===sc.grid){setShowGrid(v=>{if(!v)setGridVisible(true);return !v})}
       else if(k===sc.sizeUp){
         if(activeTool===TOOLS.ERASER)setEraserSize(v=>Math.min(200,v+5))
         else setPenSize(v=>Math.min(100,v+1))
@@ -1748,9 +1839,13 @@ export default function App() {
     const sh=cropH*img.naturalHeight/oldH
     setCvW(newW);setCvH(newH);cvRef.current={w:newW,h:newH}
     Object.entries(layerCanvases.current).forEach(([id,c])=>{
+      // 切り取り前に右半分の同領域を保存して描画を保持
+      const savedData=c.getContext('2d').getImageData(x1+oldW/2,y1,cropW,cropH)
       c.width=newW;c.height=newH
       const ctx=c.getContext('2d')
       if(+id===PAPER_ID){ctx.fillStyle='#fff';ctx.fillRect(0,0,newW,newH)}
+      // 保存した描画を新しい右半分に配置
+      ctx.putImageData(savedData,newW/2,0)
       const blank=ctx.getImageData(0,0,newW,newH)
       histStacks.current[String(id)]=[blank];histPtrs.current[String(id)]=0
     })
@@ -2035,7 +2130,6 @@ export default function App() {
             <button className="tool-btn" onClick={doUndo} title="取り消し (Ctrl+Z)"><UndoIcon/></button>
             <button className="tool-btn" onClick={doRedo} title="やり直し (Ctrl+Y)"><RedoIcon/></button>
             <button className="tool-btn" onClick={clearActive} title="レイヤーをクリア"><ClearLayerIcon/></button>
-            <button className="tool-btn" onClick={resetAllLayers} title="参考画像を初期状態にリセット" style={{color:'#e07070'}}><ResetIcon/></button>
           </div>
           <div className="color-section">
             <input type="color" value={penColor} onChange={e=>setPenColor(e.target.value)} className="color-wheel" title="色選択"/>
@@ -2064,7 +2158,7 @@ export default function App() {
                   onDragOver={onCanvasDragOver}
                   onDragLeave={onCanvasDragLeave}
                   onDrop={onCanvasDrop}/>
-                {showRuler&&<RulerOverlay w={cvW} h={cvH} rulers={rulers} activeRulerId={activeRulerId}/>}
+                {showRuler&&<RulerOverlay w={cvW} h={cvH} rulers={rulers} activeRulerId={activeRulerId} scale={dispSize.w>0?cvW/dispSize.w:1}/>}
                 {cropMode&&cropRect&&(
                   <div style={{position:'absolute',top:0,left:0,width:'50%',height:'100%',pointerEvents:'none',zIndex:8}}>
                     <svg width="100%" height="100%" viewBox={`0 0 ${cvW/2} ${cvH}`}
@@ -2167,43 +2261,6 @@ export default function App() {
                 <button className="practice-close" onClick={()=>{setPracticeMode(false);setPracticeDrawMode(false)}} title="練習モードを終了">✕</button>
               </div>
             )}
-            {/* 描画パネル下サブバー: 重ねて表示 + 形を変える */}
-            {dispSize.w>0&&(refImage||practiceMode)&&(
-              <div className="practice-bar" style={{
-                position:'absolute',
-                left:`calc(50%)`,
-                top:`calc(50% + ${dispSize.h/2}px)`,
-                bottom:'auto',
-                width:dispSize.w/2,
-                justifyContent:'flex-end'
-              }}>
-                {/* 不透明度スライダー（ボタンの左に、ONのとき表示） */}
-                {(practiceMode?practiceOverlay:refOverlay)&&<>
-                  <input type="range" min="0" max="100"
-                    value={practiceMode?practiceOverlayOpacity:refOverlayOpacity}
-                    onChange={e=>practiceMode?setPracticeOverlayOpacity(+e.target.value):setRefOverlayOpacity(+e.target.value)}
-                    className="split-slider" style={{width:72}}/>
-                  <span style={{color:'#aaa',fontSize:11,flexShrink:0,minWidth:26}}>
-                    {practiceMode?practiceOverlayOpacity:refOverlayOpacity}%
-                  </span>
-                </>}
-                {/* 重ねて表示ボタン（常に右端近くで位置固定） */}
-                <button
-                  className={`pst-btn${(practiceMode?practiceOverlay:refOverlay)?' pst-active':''}`}
-                  onClick={()=>practiceMode?setPracticeOverlay(v=>!v):setRefOverlay(v=>!v)}
-                  title="描画パネルに重ねて表示"><OverlayIcon/></button>
-                {/* 形を変える（練習モードのみ） */}
-                {practiceMode&&<button className="practice-shuffle" onClick={()=>{
-                  if(practiceCategory==='3d'){
-                    const o=genCompound();practiceObjRef.current=o;setPracticeObject({...o})
-                    const phi=.18+o.ep*.52,theta=o.rot*8+o.skX*3
-                    setPracticeOrbit({rx:phi,ry:theta,rz:0,zoom:1})
-                  } else {
-                    const o=genFlat();practiceObjRef.current=o;setPracticeObject({...o})
-                  }
-                }} title="形を変える"><ShuffleIcon/></button>}
-              </div>
-            )}
           </div>
 
           <div className="bottom-bar">
@@ -2228,6 +2285,7 @@ export default function App() {
               </span>
             </>}
             {(refImage||practiceMode)&&<button className={`bb-crop-btn${(practiceMode?practiceOverlay:refOverlay)?' bb-crop-reset':''}`} onClick={()=>practiceMode?setPracticeOverlay(v=>!v):setRefOverlay(v=>!v)} title="描画パネルに重ねて表示"><OverlayIcon/></button>}
+            {refImage&&!practiceMode&&<button className="bb-crop-btn" onClick={resetAllLayers} title="参考画像を初期状態にリセット" style={{color:'#e07070'}}><ResetIcon/></button>}
             {refImage&&!practiceMode&&(appliedCrop?(
               <button className="bb-crop-btn bb-crop-reset" onClick={resetCrop} title="切り取りを解除">切り取り解除</button>
             ):cropMode?(
@@ -2244,6 +2302,17 @@ export default function App() {
 
         {showLayerPanel&&(
           <div className="sidebar-col">
+            {/* ── ナビゲーター ─────────────────────────── */}
+            <div className="nav-sidebar">
+              <div className="pen-sidebar-hdr">ナビゲーター</div>
+              <div className="nav-canvas-wrap">
+                <canvas ref={navigatorRef}
+                  style={{width:'100%',display:'block',cursor:'crosshair'}}
+                  onPointerDown={onNavDown}
+                  onPointerMove={onNavMove}
+                  onPointerUp={onNavUp}/>
+              </div>
+            </div>
             {/* ── ツール設定（上部固定）─────────────────── */}
             <aside className="pen-sidebar">
               {(activeTool===TOOLS.PEN)&&<>
@@ -2253,9 +2322,11 @@ export default function App() {
                     <span className="tool-label">太さ</span>
                     <input type="range" min="1" max="100" value={penSize}
                       onChange={e=>setPenSize(+e.target.value)} className="tool-slider"/>
+                    <button className="size-step-btn" onClick={()=>setPenSize(v=>Math.max(1,v-1))}>−</button>
                     <input type="number" min="1" max="100" value={penSize}
                       onChange={e=>{const v=Math.max(1,Math.min(100,+e.target.value||1));setPenSize(v)}}
                       className="tool-size-input"/>
+                    <button className="size-step-btn" onClick={()=>setPenSize(v=>Math.min(100,v+1))}>+</button>
                   </div>
                 </div>
               </>}
@@ -2266,14 +2337,21 @@ export default function App() {
                     <span className="tool-label">太さ</span>
                     <input type="range" min="1" max="80" value={eraserSize}
                       onChange={e=>setEraserSize(+e.target.value)} className="tool-slider"/>
+                    <button className="size-step-btn" onClick={()=>setEraserSize(v=>Math.max(1,v-1))}>−</button>
                     <input type="number" min="1" max="999" value={eraserSize}
                       onChange={e=>{const v=Math.max(1,Math.min(999,+e.target.value||1));setEraserSize(v)}}
                       className="tool-size-input"/>
+                    <button className="size-step-btn" onClick={()=>setEraserSize(v=>Math.min(999,v+1))}>+</button>
                   </div>
                 </div>
               </>}
               {showGrid&&!hardMode&&<>
-                <div className="pen-sidebar-hdr">マス目</div>
+                <div className="pen-sidebar-hdr" style={{display:'flex',alignItems:'center',justifyContent:'space-between',paddingRight:6}}>
+                  <span>マス目</span>
+                  <button className="ruler-del-btn" onClick={()=>setGridVisible(v=>!v)} title={gridVisible?'非表示にする':'表示する'} style={{opacity:gridVisible?1:.45}}>
+                    {gridVisible?<EyeIcon/>:<EyeOffIcon/>}
+                  </button>
+                </div>
                 <div className="pen-sidebar-body">
                   <div className="pen-size-row" style={{gap:4,marginBottom:4}}>
                     <button className={`grid-mode-btn${gridSize>0?' gm-active':''}`} onClick={()=>{if(gridSize<0)setGridSize(100)}}>サイズ</button>
@@ -2319,11 +2397,18 @@ export default function App() {
                       {rulers.map((r,i)=>(
                         <div key={r.id}
                           className={`ruler-row${activeRulerId===r.id?' ruler-row--active':''}`}
-                          onClick={()=>setActiveRulerId(r.id)}>
+                          style={r.visible===false?{opacity:.55}:undefined}
+                          onClick={()=>{setActiveRulerId(r.id);if(activeRulerId!==r.id)setRulerSettingsOpen(false)}}>
                           <span className="ruler-color-dot" style={{background:r.color}}/>
                           <span className="ruler-row-label">
                             {i+1}. {r.type==='none'?'線':r.type==='cm'?'cm':`÷${r.divisions}`}
                           </span>
+                          {activeRulerId===r.id&&<button className="ruler-del-btn" style={{marginRight:1}} onClick={e=>{e.stopPropagation();setRulerSettingsOpen(v=>!v)}} title="設定">
+                            <span style={{display:'inline-block',transform:rulerSettingsOpen?'rotate(180deg)':'none',transition:'transform .15s'}}>∨</span>
+                          </button>}
+                          <button className="ruler-del-btn" style={{opacity:r.visible===false?.4:1}} onClick={e=>{e.stopPropagation();setRulers(rs=>rs.map(x=>x.id===r.id?{...x,visible:x.visible===false}:x))}} title={r.visible===false?'表示する':'非表示にする'}>
+                            {r.visible===false?<EyeOffIcon/>:<EyeIcon/>}
+                          </button>
                           <button className="ruler-del-btn" onClick={e=>{
                             e.stopPropagation()
                             setRulers(rs=>rs.filter(x=>x.id!==r.id))
@@ -2333,7 +2418,7 @@ export default function App() {
                       ))}
                     </div>}
                     {/* 選択中定規の設定 */}
-                    {ar&&<div className="ruler-settings">
+                    {ar&&rulerSettingsOpen&&<div className="ruler-settings">
                       <div className="ruler-settings-title">定規 {rulers.indexOf(ar)+1} の設定</div>
                       <select value={ar.type}
                         onChange={e=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,type:e.target.value}:r))}
@@ -2461,11 +2546,16 @@ export default function App() {
           borderRadius:'50%',
           border:'1px solid rgba(0,0,0,0.85)',
           boxShadow:'0 0 0 0.75px rgba(255,255,255,0.7)',
-          pointerEvents:'none',zIndex:9999
+          pointerEvents:'none',zIndex:9999,
+          overflow:'visible'
         }}>
-          <div className="cur-cross" style={{position:'absolute',inset:0,opacity:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
-            <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="black" strokeWidth="1">
-              <line x1="4" y1="0" x2="4" y2="8"/><line x1="0" y1="4" x2="8" y2="4"/>
+          <div className="cur-cross" style={{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',opacity:0,pointerEvents:'none'}}>
+            <svg width="1" height="1" style={{overflow:'visible',display:'block',filter:'drop-shadow(0 0 0.6px rgba(255,255,255,0.95))'}}
+              fill="none" stroke="rgba(0,0,0,0.9)" strokeWidth="1" strokeLinecap="round">
+              <line x1="0" y1="-11" x2="0" y2="-4"/>
+              <line x1="0" y1="4" x2="0" y2="11"/>
+              <line x1="-11" y1="0" x2="-4" y2="0"/>
+              <line x1="4" y1="0" x2="11" y2="0"/>
             </svg>
           </div>
         </div>

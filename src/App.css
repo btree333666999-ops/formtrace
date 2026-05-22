@@ -293,9 +293,13 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
 
 .lp-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 6px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  padding: 6px 8px 5px 11px;
+  border-bottom: 1px solid rgba(77,157,224,0.25);
+  border-left: 3px solid var(--accent);
+  background: #161616;
+  flex-shrink: 0;
 }
-.lp-title { font-weight: 600; font-size: 12px; }
+.lp-title { font-weight: 700; font-size: 10px; color: #d4d4d4; letter-spacing: 0.7px; text-transform: uppercase; }
 .lp-actions { display: flex; gap: 2px; }
 .lp-actions button {
   width: 23px; height: 23px;
@@ -648,15 +652,16 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
 }
 .ruler-row {
   display: flex; align-items: center; gap: 5px;
-  padding: 4px 6px; border-radius: var(--radius);
-  cursor: pointer; background: var(--btn-bg);
-  border: 1px solid transparent; transition: background .1s;
-  font-size: 11px;
+  padding: 5px 7px; border-radius: var(--radius);
+  cursor: pointer; background: #262626;
+  border: 1px solid #383838; transition: background .1s, border-color .1s;
+  font-size: 11px; color: #c8c8c8;
 }
-.ruler-row:hover { background: var(--btn-hover); }
+.ruler-row:hover { background: #2e2e2e; border-color: #4a4a4a; }
 .ruler-row--active {
-  background: var(--layer-active);
-  border-color: var(--accent);
+  background: #1e3050;
+  border-color: rgba(77,157,224,0.6);
+  color: #d8eaf8;
 }
 .ruler-color-dot {
   width: 10px; height: 10px; border-radius: 50%;
@@ -670,14 +675,17 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
 }
 .ruler-del-btn:hover { background: #552222; color: #ff8888; }
 .ruler-settings {
-  background: var(--layer-active);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  padding: 6px 7px; margin-bottom: 6px;
+  background: #1b2535;
+  border: 1px solid rgba(77,157,224,0.3);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  padding: 8px 8px 7px; margin-bottom: 6px;
 }
 .ruler-settings-title {
-  font-size: 10px; color: var(--text-dim);
-  margin-bottom: 4px; font-weight: 600;
+  font-size: 10px; color: #aac4e0; font-weight: 700;
+  letter-spacing: 0.4px; text-transform: uppercase;
+  margin-bottom: 6px; padding-bottom: 4px;
+  border-bottom: 1px solid rgba(77,157,224,0.2);
 }
 .ruler-add-hint {
   font-size: 10px; color: var(--accent);
@@ -716,26 +724,54 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
   min-width: 24px; text-align: right;
 }
 .tool-size-input {
-  width: 38px; text-align: center; font-size: 11px; font-weight: 600;
+  width: 34px; text-align: center; font-size: 11px; font-weight: 600;
   background: #1e1e1e; color: var(--text); border: 1px solid #444;
-  border-radius: 3px; padding: 1px 3px; outline: none;
+  border-radius: 0; padding: 1px 2px; outline: none;
   -moz-appearance: textfield;
 }
 .tool-size-input::-webkit-outer-spin-button,
 .tool-size-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.size-step-btn {
+  width: 18px; height: 20px; flex-shrink: 0;
+  background: #2a2a2a; color: var(--text); border: 1px solid #444;
+  font-size: 14px; line-height: 1; cursor: pointer; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  user-select: none;
+}
+.size-step-btn:first-of-type { border-radius: 3px 0 0 3px; border-right: none; }
+.size-step-btn:last-of-type  { border-radius: 0 3px 3px 0; border-left: none; }
+.size-step-btn:hover { background: #3a3a3a; }
+.size-step-btn:active { background: var(--accent); color: #fff; }
+
+/* ── Navigator ───────────────────────────────────────────────────── */
+.nav-sidebar {
+  flex-shrink: 0;
+  background: var(--sidebar-bg);
+  border-bottom: 3px solid #111;
+}
+.nav-canvas-wrap {
+  padding: 5px 6px 6px;
+  background: #111;
+}
+.nav-canvas-wrap canvas {
+  display: block;
+  image-rendering: pixelated;
+  border: 1px solid #333;
+}
 
 /* ── Pen settings sub-window ─────────────────────────────────────── */
 .pen-sidebar {
   flex-shrink: 0;
   background: var(--sidebar-bg);
-  border-bottom: 2px solid var(--border);
+  border-bottom: 3px solid #111;
 }
 .pen-sidebar-hdr {
-  padding: 5px 10px 5px;
-  font-size: 10px; font-weight: 700; color: #c0c0c0;
-  border-bottom: 2px solid var(--accent);
-  background: #1a1a1a;
-  letter-spacing: 0.6px;
+  padding: 6px 10px 5px 11px;
+  font-size: 10px; font-weight: 700; color: #d4d4d4;
+  border-bottom: 1px solid rgba(77,157,224,0.25);
+  border-left: 3px solid var(--accent);
+  background: #161616;
+  letter-spacing: 0.7px;
   text-transform: uppercase;
 }
 .pen-sidebar-body {
