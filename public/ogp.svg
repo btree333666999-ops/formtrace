@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <!-- Background -->
+  <rect width="1200" height="630" fill="#0d1117"/>
+  <!-- Subtle grid -->
+  <line x1="600" y1="0" x2="600" y2="630" stroke="#1a2530" stroke-width="1"/>
+  <line x1="0" y1="315" x2="1200" y2="315" stroke="#1a2530" stroke-width="1"/>
+  <!-- Large form shape (circle) -->
+  <circle cx="520" cy="315" r="180" fill="none" stroke="#4a9eff" stroke-width="6" opacity="0.7"/>
+  <!-- Trace line -->
+  <path d="M360 220 Q520 80 680 220 Q760 315 680 410" fill="none" stroke="#ff4444" stroke-width="5" stroke-linecap="round" opacity="0.9"/>
+  <circle cx="680" cy="410" r="10" fill="#ff4444" opacity="0.9"/>
+  <!-- Accent lines -->
+  <line x1="0" y1="6" x2="1200" y2="6" stroke="#4a9eff" stroke-width="6"/>
+  <line x1="0" y1="624" x2="1200" y2="624" stroke="#4a9eff" stroke-width="6"/>
+  <!-- Logo text -->
+  <text x="780" y="290" font-family="Arial,sans-serif" font-size="88" font-weight="700" fill="#ffffff" letter-spacing="-2">Form</text>
+  <text x="780" y="390" font-family="Arial,sans-serif" font-size="88" font-weight="700" fill="#4a9eff" letter-spacing="-2">Trace</text>
+  <!-- Tagline -->
+  <text x="782" y="440" font-family="Arial,sans-serif" font-size="28" fill="#8899aa" letter-spacing="1">形のクロッキー練習ツール</text>
+</svg>
