@@ -758,6 +758,7 @@ export default function App() {
   const shiftKeyRef     = useRef(false)
   const penSnapDirRef   = useRef(null)
   const penShiftSnapRef = useRef(null)
+  const smoothPtRef     = useRef(null)
 
   const S = useRef({})
   S.current = {activeTool,penColor,penSize,eraserSize,activeLayerId,refOpacity,layers,showGrid,gridVisible,gridSize,gridOpacity,practiceMode,practiceDrawMode,practiceStyle,practiceObject,rulerType,rulerDivisions,rulerColor,hardMode,practiceOrbit,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity,pressureSensitivity}
@@ -1230,6 +1231,7 @@ export default function App() {
       const ctx=draw?.getContext('2d');if(!ctx)return
       saveHist()
       penStrokeStart.current=pt;penSnapDirRef.current=null;lastClientXY.current={x:e.clientX,y:e.clientY}
+      smoothPtRef.current={x:pt.x,y:pt.y}
       const pr=(S.current.pressureSensitivity&&e.pointerType==='pen')?Math.max(0.05,e.pressure):1
       const sz=Math.max(1,activeSize*pr)
       ctx.globalCompositeOperation=activeTool===TOOLS.ERASER?'destination-out':'source-over'
@@ -1342,11 +1344,16 @@ export default function App() {
       const ctx=draw?.getContext('2d');if(!ctx)return
       const pr=(S.current.pressureSensitivity&&e.pointerType==='pen')?Math.max(0.05,e.pressure):1
       const sz=Math.max(1,activeSize*pr)
+      // EMA smoothing (α=0.4): reduces hand tremor while keeping responsiveness
+      const alpha=0.4
+      const prev=smoothPtRef.current??pt
+      const spt={x:alpha*pt.x+(1-alpha)*prev.x,y:alpha*pt.y+(1-alpha)*prev.y}
+      smoothPtRef.current=spt
       ctx.globalCompositeOperation=activeTool===TOOLS.ERASER?'destination-out':'source-over'
       ctx.strokeStyle=activeTool===TOOLS.ERASER?'rgba(0,0,0,1)':penColor
       ctx.lineWidth=sz;ctx.lineCap='round';ctx.lineJoin='round'
       if(e.shiftKey&&penStrokeStart.current&&penShiftSnapRef.current){
-        const snapped=applySnap(pt,{angleSnap:true,lineFrom:penStrokeStart.current})
+        const snapped=applySnap(spt,{angleSnap:true,lineFrom:penStrokeStart.current})
         const {w:cw2,h:ch2}=cvRef.current
         const prevComp=ctx.globalCompositeOperation
         ctx.globalCompositeOperation='source-over'
@@ -1355,8 +1362,8 @@ export default function App() {
         ctx.beginPath();ctx.moveTo(penStrokeStart.current.x,penStrokeStart.current.y);ctx.lineTo(snapped.x,snapped.y);ctx.stroke()
         lastPt.current=snapped
       } else {
-        ctx.beginPath();ctx.moveTo(lastPt.current.x,lastPt.current.y);ctx.lineTo(pt.x,pt.y);ctx.stroke()
-        lastPt.current=pt
+        ctx.beginPath();ctx.moveTo(lastPt.current.x,lastPt.current.y);ctx.lineTo(spt.x,spt.y);ctx.stroke()
+        lastPt.current=spt
       }
       lastClientXY.current={x:e.clientX,y:e.clientY}
       comp();tick()
@@ -1435,7 +1442,7 @@ export default function App() {
     }
     if(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER){saveHist()}
     else if(activeTool===TOOLS.MOVE){saveHist()}
-    penSnapDirRef.current=null;penShiftSnapRef.current=null;lastClientXY.current=null
+    penSnapDirRef.current=null;penShiftSnapRef.current=null;lastClientXY.current=null;smoothPtRef.current=null
     const ctx2=draw?.getContext('2d');if(ctx2)ctx2.globalCompositeOperation='source-over'
     moveSnap.current=null;lastPt.current=null
   }
@@ -2216,7 +2223,7 @@ export default function App() {
                       <button className="url-btn" onClick={()=>loadFromUrl(urlInput)}>→</button>
                     </div>
                     {urlError&&<div className="url-err-box">{URL_ERR[urlError].split('\n').map((l,i)=><p key={i}>{l}</p>)}</div>}
-                    <button className="practice-start-btn" onClick={startPractice}>🔷 幾何学練習モード</button>
+                    <button className="practice-start-btn" onClick={startPractice}>✦ フォーム練習</button>
                   </div>
                 )}
               </div>
@@ -2735,7 +2742,7 @@ function drawSelPath(ctx,sel){
 function TB({label,active,onClick,children}){return <button className={`tool-btn${active?' active':''}`} onClick={onClick} title={label}>{children}</button>}
 function MenuIcon(){return<svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="2" y1="5" x2="18" y2="5"/><line x1="2" y1="10" x2="18" y2="10"/><line x1="2" y1="15" x2="18" y2="15"/></svg>}
 function UndoIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 00-4-4H4"/></svg>}
-function ClearLayerIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>}
+function ClearLayerIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"/><line x1="19.1" y1="4.9" x2="4.9" y2="19.1"/></svg>}
 function ResetIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>}
 function RedoIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 014-4h12"/></svg>}
 function PenIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>}
