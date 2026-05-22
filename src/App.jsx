@@ -688,7 +688,8 @@ export default function App() {
   const [appliedCrop,setAppliedCrop] = useState(null)
   const [photoAreaDragOver,setPhotoAreaDragOver] = useState(false)
   const [pressureSensitivity,setPressureSensitivity] = useState(true)
-  const [flipH,setFlipH] = useState(false)
+  const [flipPhoto,setFlipPhoto] = useState(false)
+  const [flipDraw,setFlipDraw] = useState(false)
 
   const setHardMode = v => { if(v&&activeTool!==TOOLS.PEN)setActiveTool(TOOLS.PEN); _setHardMode(v) }
 
@@ -767,9 +768,11 @@ export default function App() {
   const penShiftSnapRef = useRef(null)
   const smoothPtRef     = useRef(null)
   const springToolRef   = useRef(null)
-  const flipHRef        = useRef(false)
+  const flipPhotoRef    = useRef(false)
+  const flipDrawRef     = useRef(false)
 
-  flipHRef.current = flipH
+  flipPhotoRef.current = flipPhoto
+  flipDrawRef.current = flipDraw
 
   const S = useRef({})
   S.current = {activeTool,penColor,penSize,eraserSize,activeLayerId,refOpacity,layers,showGrid,gridVisible,gridSize,gridOpacity,practiceMode,practiceDrawMode,practiceStyle,practiceObject,rulerType,rulerDivisions,rulerColor,hardMode,practiceOrbit,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity,pressureSensitivity}
@@ -905,6 +908,8 @@ export default function App() {
     ctx.fillStyle='#fff';ctx.fillRect(0,0,cw,ch)
     const {practiceMode,practiceStyle,practiceObject,refOpacity,layers,showGrid,gridVisible,gridSize,gridOpacity,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity}=S.current
     // Left half: photo or practice
+    const _flipL=flipPhotoRef.current
+    if(_flipL){ctx.save();ctx.beginPath();ctx.rect(0,0,cw/2,ch);ctx.clip();ctx.translate(cw/4,0);ctx.scale(-1,1);ctx.translate(-cw/4,0)}
     if(practiceMode){
       if(practiceCategory==='flat'){
         drawFlatPractice(ctx,practiceObject,cw/2,ch,flatStyle)
@@ -923,25 +928,29 @@ export default function App() {
       ctx.drawImage(photoLayerCanvas.current,0,0)
       ctx.globalAlpha=1
     }
+    if(_flipL)ctx.restore()
     // Paper: clip to right half so photo shows on left
     const paper=layers.find(l=>l.isPaper)
+    const _flipR=flipDrawRef.current
     if(paper?.visible){
       const lc=layerCanvases.current[paper.id];if(lc){
         ctx.save();ctx.beginPath();ctx.rect(cw/2,0,cw/2,ch);ctx.clip()
+        if(_flipR){ctx.translate(3*cw/4,0);ctx.scale(-1,1);ctx.translate(-3*cw/4,0)}
         ctx.globalAlpha=paper.opacity/100;ctx.drawImage(lc,0,0);ctx.globalAlpha=1
         ctx.restore()
       }
     }
     // ── Reference / practice overlay on right half (trace guide) ──
     if(!practiceMode&&refOverlay&&photoLayerCanvas.current){
-      // src: left half of photoLayerCanvas → dst: right half of display
       ctx.save();ctx.beginPath();ctx.rect(cw/2,0,cw/2,ch);ctx.clip()
+      if(flipPhotoRef.current){ctx.translate(3*cw/4,0);ctx.scale(-1,1);ctx.translate(-3*cw/4,0)}
       ctx.globalAlpha=refOverlayOpacity/100
       ctx.drawImage(photoLayerCanvas.current,0,0,cw/2,ch,cw/2,0,cw/2,ch)
       ctx.globalAlpha=1;ctx.restore()
     }
     if(practiceMode&&practiceOverlay){
       ctx.save();ctx.beginPath();ctx.rect(cw/2,0,cw/2,ch);ctx.clip()
+      if(flipPhotoRef.current){ctx.translate(3*cw/4,0);ctx.scale(-1,1);ctx.translate(-3*cw/4,0)}
       ctx.globalAlpha=practiceOverlayOpacity/100
       if(practiceCategory==='flat'){
         drawFlatPractice(ctx,practiceObject,cw/2,ch,flatStyle,cw/2,0)
@@ -950,12 +959,23 @@ export default function App() {
       }
       ctx.globalAlpha=1;ctx.restore()
     }
-    // Drawing layers: full canvas, bottom to top
+    // Drawing layers: flip within right half when flipDraw, else full canvas
     const dl=layers.filter(l=>!l.isPaper)
-    for(const l of dl){
-      if(!l.visible)continue
-      const lc=layerCanvases.current[l.id];if(!lc)continue
-      ctx.globalAlpha=l.opacity/100;ctx.drawImage(lc,0,0);ctx.globalAlpha=1
+    if(_flipR){
+      ctx.save();ctx.beginPath();ctx.rect(cw/2,0,cw/2,ch);ctx.clip()
+      ctx.translate(3*cw/4,0);ctx.scale(-1,1);ctx.translate(-3*cw/4,0)
+      for(const l of dl){
+        if(!l.visible)continue
+        const lc=layerCanvases.current[l.id];if(!lc)continue
+        ctx.globalAlpha=l.opacity/100;ctx.drawImage(lc,0,0);ctx.globalAlpha=1
+      }
+      ctx.restore()
+    }else{
+      for(const l of dl){
+        if(!l.visible)continue
+        const lc=layerCanvases.current[l.id];if(!lc)continue
+        ctx.globalAlpha=l.opacity/100;ctx.drawImage(lc,0,0);ctx.globalAlpha=1
+      }
     }
     // Grid — drawn independently for each half
     if(showGrid&&gridVisible){
@@ -1072,6 +1092,17 @@ export default function App() {
     el.addEventListener('mousedown',onMouseDown)
     return()=>{el.removeEventListener('wheel',onWheel);el.removeEventListener('mousedown',onMouseDown)}
   },[])
+
+  useEffect(()=>{
+    const nav=navigatorRef.current;if(!nav)return
+    const onWheel=e=>{
+      e.preventDefault()
+      const curZ=viewZoomRef.current/100
+      setViewZoom(Math.round(Math.min(400,Math.max(20,curZ*Math.pow(0.999,e.deltaY)*100))))
+    }
+    nav.addEventListener('wheel',onWheel,{passive:false})
+    return()=>nav.removeEventListener('wheel',onWheel)
+  },[showLayerPanel])
 
   // ── Three.js scene ────────────────────────────────────────────
   useEffect(()=>{
@@ -1197,7 +1228,11 @@ export default function App() {
     const r=disp.getBoundingClientRect()
     const {w:cw,h:ch}=cvRef.current
     const rawX=(e.clientX-r.left)*(cw/r.width)
-    return{x:flipHRef.current?cw-rawX:rawX,y:(e.clientY-r.top)*(ch/r.height)}
+    const rawY=(e.clientY-r.top)*(ch/r.height)
+    let x=rawX
+    if(rawX>=cw/2&&flipDrawRef.current)x=3*cw/2-rawX
+    else if(rawX<cw/2&&flipPhotoRef.current)x=cw/2-rawX
+    return{x,y:rawY}
   }
 
   // ── Handlers ──────────────────────────────────────────────────
@@ -1629,7 +1664,7 @@ export default function App() {
       else if(sc.undo&&k===sc.undo){doUndoRef.current()}
       else if(sc.redo&&k===sc.redo){doRedoRef.current()}
       else if(sc.fitScreen&&k===sc.fitScreen){fitScreen()}
-      else if(sc.flipH&&k===sc.flipH){setFlipH(v=>!v)}
+      else if(sc.flipH&&k===sc.flipH){setFlipDraw(v=>!v)}
     }
     const onKeyUp=e=>{
       if(springToolRef.current&&e.key===springToolRef.current.key){
@@ -2214,7 +2249,7 @@ export default function App() {
             <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
               <div style={{position:'relative',flexShrink:0,
                 width:dispSize.w||cvW,height:dispSize.h||cvH,
-                transform:`translate(${panOffset.x}px,${panOffset.y}px) scale(${viewZoom/100})${flipH?' scaleX(-1)':''}`,
+                transform:`translate(${panOffset.x}px,${panOffset.y}px) scale(${viewZoom/100})`,
                 transformOrigin:'center'}}>
                 <canvas ref={displayRef} width={cvW} height={cvH}
                   style={{width:'100%',height:'100%',display:'block',cursor,touchAction:'none'}}
@@ -2342,7 +2377,8 @@ export default function App() {
             <input type="range" min="20" max="400" value={viewZoom} onChange={e=>setViewZoom(+e.target.value)} className="zoom-slider" title="表示サイズ (二本指スクロールでズーム)"/>
             <span className="bb-val">{viewZoom}%</span>
             {(viewZoom!==100||panOffset.x||panOffset.y)&&<button className="bb-reset-btn" onClick={()=>{setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}} title="表示位置・ズームをリセット">⟳</button>}
-            <button className={`bb-crop-btn${flipH?' bb-crop-reset':''}`} onClick={()=>setFlipH(v=>!v)} title="左右反転"><FlipHIcon/></button>
+            <button className={`bb-crop-btn${flipPhoto?' bb-crop-reset':''}`} onClick={()=>setFlipPhoto(v=>!v)} title="参考画像を左右反転"><FlipHIcon/></button>
+            <button className={`bb-crop-btn${flipDraw?' bb-crop-reset':''}`} onClick={()=>setFlipDraw(v=>!v)} title="描画エリアを左右反転"><FlipHIcon/></button>
             <div style={{flex:1}}/>
             {(refImage||practiceMode)&&(practiceMode?practiceOverlay:refOverlay)&&<>
               <input type="range" min="0" max="100"
@@ -2373,7 +2409,14 @@ export default function App() {
           <div className="sidebar-col">
             {/* ── ナビゲーター ─────────────────────────── */}
             <div className="nav-sidebar">
-              <div className="pen-sidebar-hdr">ナビゲーター</div>
+              <div className="pen-sidebar-hdr nav-hdr">
+                <span>ナビゲーター</span>
+                <div className="nav-hdr-btns">
+                  <button className={`nav-icon-btn${flipPhoto?' active':''}`} onClick={()=>setFlipPhoto(v=>!v)} title="参考画像を左右反転"><FlipHIcon/></button>
+                  <button className={`nav-icon-btn${flipDraw?' active':''}`} onClick={()=>setFlipDraw(v=>!v)} title="描画エリアを左右反転"><FlipHIcon/></button>
+                  <button className="nav-icon-btn" onClick={()=>{setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}} title="表示をリセット"><ResetIcon/></button>
+                </div>
+              </div>
               <div className="nav-canvas-wrap">
                 <canvas ref={navigatorRef}
                   style={{width:'100%',display:'block',cursor:'crosshair'}}

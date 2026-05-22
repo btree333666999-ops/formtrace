@@ -758,6 +758,28 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
   background: var(--sidebar-bg);
   border-bottom: 3px solid #111;
 }
+.nav-hdr {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.nav-hdr > span { flex: 1; }
+.nav-hdr-btns { display: flex; gap: 1px; }
+.nav-icon-btn {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 2px 3px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+.nav-icon-btn:hover { background: #3a3a3a; color: #ccc; }
+.nav-icon-btn.active { color: #4db3ff; }
+
 .nav-canvas-wrap {
   padding: 5px 6px 6px;
   background: #111;
