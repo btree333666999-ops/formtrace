@@ -2015,7 +2015,7 @@ export default function App() {
     const flash=a=>{
       setTabmateFlash(a)
       clearTimeout(tabmateFlashTimer.current)
-      tabmateFlashTimer.current=setTimeout(()=>setTabmateFlash(null),600)
+      tabmateFlashTimer.current=setTimeout(()=>setTabmateFlash(null),1500)
     }
     for(const {i,v} of presses){
       const btnKey = `${rid}:${i}:${v}`
