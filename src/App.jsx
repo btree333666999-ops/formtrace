@@ -897,16 +897,23 @@ export default function App() {
       let photoW,photoH
       if(pAR>halfW/ah){photoW=halfW;photoH=halfW/pAR}
       else{photoH=ah;photoW=ah*pAR}
-      const oldW=cvRef.current.w
+      const oldDispW=dispSizeRef.current.w
+      const oldCvW=cvRef.current.w
       const nw=Math.round(photoW)*2,nh=Math.round(photoH)
       setCvW(nw);setCvH(nh);cvRef.current={w:nw,h:nh}
       // gridSizeをキャンバス幅の変化に合わせてスケール（分割モードは変えない）
-      if(oldW>0&&nw!==oldW){
-        const sx=nw/oldW
+      if(oldCvW>0&&nw!==oldCvW){
+        const sx=nw/oldCvW
         setGridSize(v=>v>0?Math.max(1,Math.round(v*sx)):v)
       }
-      // ズームをリセット（キャンバスサイズが変わるため密度が変わらないよう）
-      setViewZoom(100);viewZoomRef.current=100
+      // 新しいdispW(100%時)を計算してviewZoomを補正 → ピクセル密度を維持
+      const newAr=nw/nh
+      let ndw=aw,ndh=aw/newAr;if(ndh>ah){ndh=ah;ndw=ah*newAr}
+      const newDispW=Math.floor(ndw)
+      if(oldDispW>0&&oldCvW>0&&newDispW>0){
+        const newVZ=Math.round(Math.min(400,Math.max(20,viewZoomRef.current*oldDispW*nw/(oldCvW*newDispW))))
+        setViewZoom(newVZ);viewZoomRef.current=newVZ
+      }else{setViewZoom(100);viewZoomRef.current=100}
       setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}
       Object.entries(layerCanvases.current).forEach(([id,c])=>{
         c.width=nw;c.height=nh
@@ -2821,10 +2828,8 @@ export default function App() {
             </div>
             {practiceMode&&dispSize.w>0&&(
               <div className="practice-bar" style={{
-                position:'absolute',
                 left:`calc(50% - ${dispSize.w/2}px)`,
-                top:`calc(50% + ${dispSize.h/2}px)`,
-                bottom:'auto',
+                right:'auto',
                 width:dispSize.w/2
               }}>
                 {/* カテゴリ切替 */}
