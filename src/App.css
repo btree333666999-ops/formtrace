@@ -505,7 +505,7 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
 }
 .tabmate-panel {
   background: #252525; border: 1px solid #444; border-radius: 10px;
-  padding: 0; min-width: 320px; max-width: 380px;
+  padding: 0; min-width: 440px; max-width: 520px;
   box-shadow: 0 8px 32px rgba(0,0,0,.6);
 }
 .tabmate-hdr {
@@ -539,7 +539,18 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
   border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
 }
 .tabmate-disc-btn:hover { color: var(--text); }
-.tabmate-map-list { padding: 8px 14px 12px; display: flex; flex-direction: column; gap: 4px; }
+.tabmate-map-list { padding: 8px 14px 12px; display: flex; flex-direction: column; gap: 4px; max-height: 65vh; overflow-y: auto; }
+/* ── Shortcut group accordion ──────────────────────────────────── */
+.sc-group { border-bottom: 1px solid #222; }
+.sc-group-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; padding: 7px 4px 7px 2px;
+  background: transparent; border: none; color: #aaa; font-size: 11px;
+  font-weight: 600; letter-spacing: .04em; cursor: pointer; text-align: left;
+  transition: color .1s;
+}
+.sc-group-hdr:hover { color: #ccc; }
+.sc-group-arrow { font-size: 9px; color: #555; }
 .tabmate-hint {
   font-size: 10px; color: var(--text-dim); margin-bottom: 6px; line-height: 1.4;
 }
@@ -548,12 +559,15 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
 }
 .tabmate-action { font-size: 12px; color: var(--text); width: 100px; flex-shrink: 0; }
 .tabmate-learn-btn {
-  flex: 1; padding: 4px 8px; font-size: 11px; text-align: center;
+  flex-shrink: 0; padding: 4px 10px; font-size: 11px; text-align: center;
+  white-space: nowrap;
   background: var(--btn-bg); color: var(--text-dim);
   border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
   transition: background .12s, color .12s;
 }
 .tabmate-learn-btn:hover { background: var(--btn-hover); color: var(--text); }
+.tabmate-learn-btn.configured { background: #0e2018; color: #5acc7a; border-color: #2a6040; }
+.tabmate-learn-btn.configured:hover { background: #142a1e; color: #7adc96; border-color: #3a8050; }
 .tabmate-learn-btn.learning {
   background: rgba(74,144,226,.2); color: var(--accent);
   border-color: var(--accent); animation: tabmate-pulse 1s ease-in-out infinite;
@@ -565,10 +579,130 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
   cursor: pointer; flex-shrink: 0;
 }
 .tabmate-clear-btn:hover { color: #ccc; border-color: #666; }
+.tabmate-release-select {
+  flex-shrink: 0; padding: 3px 6px; font-size: 11px;
+  background: #1e2736; color: #8ab4d4;
+  border: 1px solid #334d66; border-radius: 4px; cursor: pointer;
+  max-width: 130px;
+}
+.tabmate-release-select:focus { outline: none; border-color: #4a9eff; }
 .sc-key {
-  min-width: 28px; text-align: center; padding: 2px 6px;
-  background: #1a1a1a; border: 1px solid #555; border-radius: 4px;
-  font-size: 12px; font-family: monospace; color: #ddd; flex-shrink: 0;
+  min-width: 44px; text-align: center; padding: 2px 7px;
+  background: #1a1a1a; border: 1px solid #333; border-radius: 4px;
+  font-size: 11px; font-family: monospace; color: #444; flex-shrink: 0;
+  white-space: nowrap;
+}
+.sc-key--set {
+  background: #0d1e2e; border-color: #2a5478; color: #7ab8e8;
+}
+.sc-livekey-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 0 10px; border-bottom: 1px solid #333; margin-bottom: 4px;
+}
+.sc-livekey-label { font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
+.sc-livekey-val {
+  font-size: 12px; font-family: monospace; padding: 2px 10px;
+  background: #111; border: 1px solid #333; border-radius: 4px;
+  color: #555; transition: color .15s, border-color .15s;
+}
+.sc-livekey-val.active { color: #6af; border-color: #4d9de0; }
+.sc-row-wrap { flex-wrap: wrap; row-gap: 3px; align-items: center; }
+.sc-trigger-wrap { position: relative; flex-shrink: 0; }
+.sc-trigger-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 200;
+  background: #1e1e1e; border: 1px solid #444; border-radius: 6px;
+  padding: 4px; min-width: 120px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.6);
+  display: flex; flex-direction: column; gap: 1px;
+}
+.sc-trigger-item {
+  padding: 6px 12px; text-align: left; font-size: 11px; font-weight: 600;
+  background: transparent; color: #888; border: none; border-radius: 4px;
+  cursor: pointer; transition: background .1s, color .1s;
+}
+.sc-trigger-item:hover { background: #2a2a2a; color: #ccc; }
+.sc-trigger-item.active { color: #6ab4e8; }
+.sc-trigger-item.active:hover { background: #1a2c40; }
+.sc-trigger-cycle {
+  flex-shrink: 0; padding: 3px 10px; font-size: 10px; line-height: 1.6;
+  border-radius: 4px; border: 1px solid #333;
+  background: #1a1a1a; color: #555;
+  cursor: pointer; white-space: nowrap;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.sc-trigger-cycle:hover { background: #242424; color: #999; border-color: #444; }
+.sc-trigger-cycle--press     { background: #161e2a; color: #7aaccc; border-color: #2a4a60; }
+.sc-trigger-cycle--press:hover  { background: #1a2535; color: #9fd; }
+.sc-trigger-cycle--temporary { background: #1e2a1e; color: #7acc8a; border-color: #3a6a40; }
+.sc-trigger-cycle--temporary:hover { background: #223525; color: #a0e8a8; }
+.sc-trigger-cycle--hold      { background: #152030; color: #6ab4e8; border-color: #2a5580; font-weight: 600; }
+.sc-trigger-cycle--hold:hover { background: #1a2c44; color: #8acfff; }
+.sc-trigger-cycle--rotation  { background: #2a1e30; color: #c08ae8; border-color: #6a3a80; }
+.sc-trigger-cycle--rotation:hover { background: #351a40; color: #d8a0ff; }
+/* ローテーション設定ボタン（トリガー横） */
+.sc-rot-edit-btn {
+  flex-shrink: 0; padding: 2px 8px; font-size: 13px; line-height: 1.6;
+  border-radius: 4px; border: 1px solid #444; background: #2a1e30;
+  color: #c08ae8; cursor: pointer; transition: background .1s, color .1s;
+}
+.sc-rot-edit-btn:hover { background: #351a40; color: #d8a0ff; }
+
+/* ローテーションエディタモーダル */
+.rot-editor-panel { min-width: 300px; max-width: 360px; }
+.rot-editor-body { padding: 10px 14px; display: flex; flex-direction: column; gap: 4px; }
+.rot-editor-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px; border-radius: 5px; background: #1e1e2a;
+}
+.rot-editor-num { font-size: 10px; color: #555; min-width: 14px; text-align: right; }
+.rot-editor-lbl { flex: 1; font-size: 12px; color: #bbb; }
+.rot-editor-primary { color: #c08ae8; font-weight: 600; }
+.rot-editor-mv {
+  padding: 1px 6px; font-size: 11px; background: #2a2a3a;
+  border: 1px solid #333; border-radius: 3px; color: #888; cursor: pointer;
+}
+.rot-editor-mv:hover:not(:disabled) { background: #3a3a4a; color: #ccc; }
+.rot-editor-mv:disabled { opacity: 0.3; cursor: default; }
+.rot-editor-rm {
+  padding: 1px 6px; font-size: 11px; background: transparent;
+  border: 1px solid #3a2a2a; border-radius: 3px; color: #885555; cursor: pointer;
+}
+.rot-editor-rm:hover { background: #2a1a1a; color: #ff8888; border-color: #553333; }
+.rot-editor-add {
+  display: flex; gap: 6px; margin-top: 6px; padding-top: 8px;
+  border-top: 1px solid #222;
+}
+.rot-editor-add select {
+  flex: 1; padding: 5px 8px; background: #1e1e1e; color: #bbb;
+  border: 1px solid #444; border-radius: 4px; font-size: 11px;
+}
+.rot-editor-add-btn {
+  padding: 5px 12px; background: #2a1e30; color: #c08ae8;
+  border: 1px solid #6a3a80; border-radius: 4px; font-size: 11px;
+  cursor: pointer; flex-shrink: 0; transition: background .1s;
+}
+.rot-editor-add-btn:hover:not(:disabled) { background: #351a40; }
+.rot-editor-add-btn:disabled { opacity: 0.4; cursor: default; }
+
+.sc-rotation-list {
+  display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; max-width: 220px;
+}
+.sc-rotation-chip {
+  padding: 2px 8px; font-size: 10px; line-height: 1.6;
+  background: #1e1e2a; color: #666; border: 1px solid #333; border-radius: 3px;
+  cursor: pointer; white-space: nowrap; transition: all .1s;
+}
+.sc-rotation-chip:hover:not(:disabled) { background: #2a2a3a; color: #aaa; border-color: #555; }
+.sc-rotation-chip.active { color: #c08ae8; border-color: #6a3a80; background: #221a2a; }
+.sc-rotation-chip.primary { opacity: 0.55; cursor: default; color: #c08ae8; border-color: #6a3a80; background: #221a2a; }
+
+/* ── ツール並べ替え ── */
+.tool-drag-item { position: relative; flex-shrink: 0; }
+.tool-drag-item.tool-dragging { opacity: 0.35; pointer-events: none; }
+.tool-drag-item.tool-drop-here::before {
+  content: ''; position: absolute; top: 3px; left: -3px; bottom: 3px;
+  width: 3px; background: var(--accent); border-radius: 2px; z-index: 20;
+  box-shadow: 0 0 6px var(--accent);
 }
 
 /* ── Tool layout customization ───────────────────────────────────── */
@@ -727,10 +861,18 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
   background: rgba(77,179,255,.13);
   color: #6ac4ff;
   font-size: 10px; font-weight: 600; letter-spacing: .5px;
-  text-align: center; padding: 5px 8px;
+  padding: 5px 8px;
   border-bottom: 1px solid rgba(77,179,255,.25);
   flex-shrink: 0; user-select: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
 }
+.sidebar-side-btn {
+  padding: 2px 8px; font-size: 10px; border-radius: 4px;
+  background: rgba(77,179,255,.15); color: #7bd; border: 1px solid rgba(77,179,255,.3);
+  cursor: pointer; white-space: nowrap; flex-shrink: 0; font-weight: 600;
+  transition: background .12s;
+}
+.sidebar-side-btn:hover { background: rgba(77,179,255,.28); color: #aef; }
 
 /* ── パネルドラッグ ── */
 .panel-section { position: relative; transition: opacity .15s; flex-shrink: 0; }

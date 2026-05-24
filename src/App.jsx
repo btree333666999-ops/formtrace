@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import * as THREE from 'three'
 import './App.css'
 
-const TOOLS = { PEN:'pen', ERASER:'eraser', SELECT:'select', MOVE:'move', LINE:'line', RULER:'ruler', HAND:'hand' }
+const TOOLS = { PEN:'pen', ERASER:'eraser', SELECT:'select', MOVE:'move', LINE:'line', RULER:'ruler', HAND:'hand', ROTATE:'rotatecanvas' }
 const PRESET_COLORS = ['#000000','#00cc00','#ff6600','#0066ff','#ff00ee','#ff0000']
 const DEFAULT_W = 2800, DEFAULT_H = 1050
 const PAPER_ID = 0
@@ -28,19 +28,68 @@ function applySnap(pt,{angleSnap=false,gridSnap=false,gridSize=100,lineFrom=null
   return{x,y}
 }
 
-const DEFAULT_SHORTCUTS={pen:'b',eraser:'e',select:'s',move:'v',line:'l',ruler:'r',grid:'g',hand:'h',sizeUp:']',sizeDn:'[',undo:'-',redo:'+',fitScreen:'',flipH:'',springEraser:'',springHand:'',springMove:''}
+const DEFAULT_SHORTCUTS={pen:'b',eraser:'e',select:'s',move:'v',line:'l',ruler:'r',grid:'g',hand:'h',sizeUp:']',sizeDn:'[',undo:'-',redo:'+',fitScreen:'',flipH:'',flipPhoto:'',flipDraw:'',zoomIn:'',zoomOut:'',rotateCanvas:'',rotateReset:'',overlay:'',springEraser:'',springHand:'',springMove:''}
+// Build a canonical key string like "Ctrl+b", "Shift+]", "Alt+F4"
+const buildKeyStr=e=>{
+  const mod=(e.ctrlKey||e.metaKey?'Ctrl+':'')+(e.altKey?'Alt+':'')+(e.shiftKey?'Shift+':'')
+  const raw=e.key==='' ?'Space':e.key
+  return mod+raw
+}
+// Format stored key string for display: "Ctrl+b" → "Ctrl + B"
+const fmtKey=k=>{
+  if(!k)return'—'
+  return k.split('+').map((p,i,a)=>{
+    if(p==='Ctrl')return'Ctrl'
+    if(p==='Alt')return'Alt'
+    if(p==='Shift')return'Shift'
+    if(p===' '||p==='Space')return'Space'
+    return p.length===1?p.toUpperCase():p
+  }).join(' + ')
+}
+// holdable:true → the action supports "押す / ホールド" mode selector
 const SHORTCUT_ACTIONS=[
-  {a:'pen',l:'ペン'},{a:'eraser',l:'消しゴム'},{a:'select',l:'選択範囲'},
-  {a:'move',l:'レイヤー移動'},{a:'line',l:'直線'},{a:'ruler',l:'定規'},
-  {a:'hand',l:'手のひら移動'},
-  {a:'grid',l:'マス目切替'},{a:'sizeUp',l:'サイズ拡大'},{a:'sizeDn',l:'サイズ縮小'},
-  {a:'undo',l:'取り消し'},{a:'redo',l:'やり直し'},
-  {a:'fitScreen',l:'全体表示'},
-  {a:'flipH',l:'左右反転'},
-  {a:'springEraser',l:'一時消しゴム（押しっぱなし）'},
-  {a:'springHand',l:'一時手のひら（押しっぱなし）'},
-  {a:'springMove',l:'一時レイヤー移動（押しっぱなし）'},
+  {a:'pen',   l:'ペン',             holdable:true, g:'tool'},
+  {a:'eraser',l:'消しゴム',         holdable:true, g:'tool'},
+  {a:'select',l:'選択範囲',         holdable:true, g:'tool'},
+  {a:'move',  l:'レイヤー移動',     holdable:true, g:'tool'},
+  {a:'line',  l:'直線',             holdable:true, g:'tool'},
+  {a:'ruler', l:'定規',             holdable:true, g:'tool'},
+  {a:'hand',  l:'手のひら移動',     holdable:true, g:'tool'},
+  {a:'grid',  l:'マス目切替',       holdable:true, g:'other'},
+  {a:'sizeUp',l:'ペンのサイズ拡大', g:'other'},
+  {a:'sizeDn',l:'ペンのサイズ縮小', g:'other'},
+  {a:'undo',  l:'取り消し',         g:'other'},
+  {a:'redo',  l:'やり直し',         g:'other'},
+  {a:'overlay',l:'重ねて表示',      holdable:true, g:'other'},
+  {a:'fitScreen', l:'全体表示',          holdable:true, g:'window'},
+  {a:'flipH',     l:'両方を左右反転',     holdable:true, g:'window'},
+  {a:'flipPhoto', l:'参考画像を左右反転',holdable:true, g:'window'},
+  {a:'flipDraw',  l:'描画エリアを左右反転',holdable:true, g:'window'},
+  {a:'zoomIn',    l:'ズームイン',   g:'window'},
+  {a:'zoomOut',      l:'ズームアウト',   g:'window'},
+  {a:'rotateCanvas', l:'キャンバス回転', holdable:true, g:'window'},
+  {a:'rotateReset',  l:'回転リセット',   g:'window'},
+  // springXxx are kept in DEFAULT_SHORTCUTS for backwards compat (hidden from UI)
 ]
+const SC_GROUPS=[
+  {key:'tool',   label:'ツール'},
+  {key:'window', label:'ウィンドウ・表示'},
+  {key:'other',  label:'その他'},
+]
+
+// ── Trigger mode helpers ──────────────────────────────────────────
+// mode stored as: undefined='default', 'temporary', 'hold', {type:'rotation',list:[...]}
+const getModeType=(modes,a)=>{
+  const m=modes[a]
+  if(!m||m==='press')return'default'        // backwards compat: 'press'→'default'
+  if(typeof m==='string')return m
+  if(typeof m==='object'&&m.type)return m.type
+  return'default'
+}
+const getRotList=(modes,a)=>{
+  const m=modes[a]
+  return(m&&typeof m==='object'&&m.type==='rotation')?(m.list||[a]):[a]
+}
 
 // ── Practice compound objects ──────────────────────────────────────
 const COMPOUNDS=['sphere','cube','cylinder','cone','torus','octahedron','tetrahedron','icosahedron','dodecahedron','prism','pyramid','capsule','torusknot','gem','arrow','mushroom','rocket','snowman','lamp','crystal','hourglass']
@@ -50,7 +99,7 @@ const FLAT_SHAPES=['circle','ellipse','triangle','rtriangle','square','rect','pe
 const FLAT_LABELS={circle:'円',ellipse:'楕円',triangle:'正三角形',rtriangle:'直角三角形',square:'正方形',rect:'長方形',pentagon:'正五角形',hexagon:'正六角形',star:'星形',diamond:'菱形',trapezoid:'台形',parallelogram:'平行四辺形'}
 const FLAT_STYLES=['filled','outline']
 const FLAT_STYLE_LABELS={filled:'塗り',outline:'輪郭'}
-const TOOL_IDS=['pen','eraser','select','move','line','ruler','grid','hand']
+const TOOL_IDS=['pen','eraser','select','move','line','ruler','grid','hand','rotatecanvas']
 
 // ep = ellipse perspective 0.2(front) → 0.55(top-down), rot/skX/skY = view angle
 function genCompound(){
@@ -644,7 +693,6 @@ export default function App() {
   const [refOpacity,setRefOpacity]     = useState(100)
   const [layers,setLayers]             = useState([mkPaper(),mkLayer(1,'レイヤー 1')])
   const [activeLayerId,setActiveLayerId] = useState(1)
-  const [showLayerPanel,setShowLayerPanel] = useState(true)
   const [rev,setRev]                   = useState(0)
   const [showGrid,setShowGrid]         = useState(false)
   const [gridVisible,setGridVisible]   = useState(true)
@@ -675,14 +723,28 @@ export default function App() {
   const [practiceOverlay,setPracticeOverlay]   = useState(false)
   const [practiceOverlayOpacity,setPracticeOverlayOpacity] = useState(40)
   const [showShortcutPanel,setShowShortcutPanel] = useState(false)
+  const [openGroups,setOpenGroups] = useState(['tool','window','other'])
+  const toggleGroup=key=>setOpenGroups(prev=>prev.includes(key)?prev.filter(k=>k!==key):[...prev,key])
+  const setRotationListFn=(action,list)=>{
+    const nm={...shortcutModes};nm[action]={type:'rotation',list}
+    setShortcutModes(nm);localStorage.setItem('shortcut-modes',JSON.stringify(nm))
+  }
   const [scLearning,setScLearning]       = useState(null)
+  const [liveKey,setLiveKey]             = useState(null)
+  const [triggerMenuOpen,setTriggerMenuOpen] = useState(null) // action key of open trigger dropdown
+  const [rotationEditOpen,setRotationEditOpen] = useState(null) // action key of open rotation editor
+  const [rotationAddAction,setRotationAddAction] = useState('')
   const [shortcuts,setShortcuts]         = useState(()=>{
     try{return{...DEFAULT_SHORTCUTS,...JSON.parse(localStorage.getItem('key-shortcuts')||'{}')} }catch{return{...DEFAULT_SHORTCUTS}}
+  })
+  const [shortcutModes,setShortcutModes] = useState(()=>{
+    try{return JSON.parse(localStorage.getItem('shortcut-modes')||'{}')} catch{return {}}
   })
   const [cvW,setCvW] = useState(DEFAULT_W)
   const [cvH,setCvH] = useState(DEFAULT_H)
   const [dispSize,setDispSize] = useState({w:0,h:0})
   const [viewZoom,setViewZoom] = useState(100)
+  const [viewRotation,setViewRotation] = useState(0)
   const [cropMode,setCropMode] = useState(false)
   const [cropRect,setCropRect] = useState(null)
   const [appliedCrop,setAppliedCrop] = useState(null)
@@ -692,7 +754,6 @@ export default function App() {
   const [flipDraw,setFlipDraw] = useState(false)
   const [panelOrder,setPanelOrder] = useState(['nav','tool','layer'])
   const [sidebarLeft,setSidebarLeft] = useState(false)
-  const [customizeMode,setCustomizeMode] = useState(false)
   const [panelDragSrc,setPanelDragSrc] = useState(null)
   const [panelDropIdx,setPanelDropIdx] = useState(null)
 
@@ -723,8 +784,15 @@ export default function App() {
   const globalPtrClientRef  = useRef({x:0,y:0})
   const navigatorRef        = useRef(null)
   const viewZoomRef         = useRef(100)
+  const viewRotationRef     = useRef(0)
+  const nonToolSpringRef    = useRef(null)  // {key, restore} for non-tool hold actions
+  const rotateStartRef      = useRef(null)  // {px, startRot} for drag-to-rotate
+  const temporarySwitchRef  = useRef({})    // {action: previousTool} for temporary mode
+  const rotationIndexRef    = useRef({})    // {action: currentIndex} for rotation mode
   const dispSizeRef         = useRef({w:0,h:0})
   const navDragRef          = useRef(false)
+  const navIntermRef        = useRef([])    // intermediate canvases for fallback downscale
+  const navGenRef           = useRef(0)     // generation counter – skip stale async results
   const [isCursorOnCanvas, setIsCursorOnCanvas] = useState(false)
 
   // layer drag-to-reorder
@@ -734,7 +802,9 @@ export default function App() {
   const [layerDragSrc, setLayerDragSrc] = useState(null)
   const [layerDropIdx, setLayerDropIdx] = useState(null)
 
-  const [toolPositions,setToolPositions]=useState(()=>{try{return JSON.parse(localStorage.getItem('tool-positions')||'{}')}catch{return{}}})
+  const [toolOrder,setToolOrder]=useState(()=>{try{return JSON.parse(localStorage.getItem('tool-order')||'null')||[...TOOL_IDS]}catch{return[...TOOL_IDS]}})
+  const [toolDragSrc,setToolDragSrc]=useState(null)
+  const [toolDropIdx,setToolDropIdx]=useState(null)
   const [editToolLayout,setEditToolLayout]=useState(false)
 
   // ── Tabmate (WebHID) ──────────────────────────────────────────
@@ -749,8 +819,11 @@ export default function App() {
   const tabmateLastReport   = useRef(null)
   const tabmateActionsRef   = useRef({})
   const tabmateMappingsRef  = useRef({})
+  const tabmateSpringRef    = useRef(null)   // {btnKey, from} when a Tabmate button is held in hold mode
   const shortcutsRef        = useRef(shortcuts)
+  const shortcutModesRef    = useRef({})
   const scLearningRef       = useRef(null)
+  const showShortcutPanelRef= useRef(false)
 
   // history
   const histStacks = useRef({})
@@ -783,9 +856,12 @@ export default function App() {
   const S = useRef({})
   S.current = {activeTool,penColor,penSize,eraserSize,activeLayerId,refOpacity,layers,showGrid,gridVisible,gridSize,gridOpacity,practiceMode,practiceDrawMode,practiceStyle,practiceObject,rulerType,rulerDivisions,rulerColor,hardMode,practiceOrbit,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity,pressureSensitivity}
   viewZoomRef.current = viewZoom
+  viewRotationRef.current = viewRotation
   dispSizeRef.current = dispSize
   shortcutsRef.current = shortcuts
+  shortcutModesRef.current = shortcutModes
   scLearningRef.current = scLearning
+  showShortcutPanelRef.current = showShortcutPanel
 
   const doUndoRef = useRef(null)
   const doRedoRef = useRef(null)
@@ -844,12 +920,15 @@ export default function App() {
   useEffect(()=>{
     const el=drawAreaRef.current;if(!el)return
     const update=()=>{
-      const aw=el.offsetWidth,ah=el.offsetHeight;if(!aw||!ah)return
+      const rect=el.getBoundingClientRect()
+      // 4px inset on each side (8px total) — keeps canvas from touching sidebar/edges
+      const aw=Math.floor(rect.width)-8,ah=Math.floor(rect.height)-8
+      if(!aw||!ah)return
       const {w:cw,h:ch}=cvRef.current
       const ar=cw/ch
       let dw=aw,dh=aw/ar
       if(dh>ah){dh=ah;dw=ah*ar}
-      setDispSize({w:Math.round(dw),h:Math.round(dh)})
+      setDispSize({w:Math.floor(dw),h:Math.floor(dh)})
     }
     update()
     const ro=new ResizeObserver(update);ro.observe(el)
@@ -884,23 +963,61 @@ export default function App() {
     const {w:dsw,h:dsh}=dispSizeRef.current
     if(!nav||!disp||!dsw||!nav.width)return
     const nw=nav.width,nh=nav.height
+    const dpr=window.devicePixelRatio||1
     const nc=nav.getContext('2d')
-    nc.clearRect(0,0,nw,nh)
-    nc.drawImage(disp,0,0,nw,nh)
-    const el=drawAreaRef.current;if(!el)return
-    const daw=el.offsetWidth,dah=el.offsetHeight
-    const zoom=viewZoomRef.current/100
-    const px=panOffsetRef.current.x,py=panOffsetRef.current.y
-    const ns=nw/dsw
-    const cl=daw/2+px-dsw*zoom/2,ct=dah/2+py-dsh*zoom/2
-    const vx0=(-cl)/zoom,vy0=(-ct)/zoom
-    const vx1=(daw-cl)/zoom,vy1=(dah-ct)/zoom
-    const rx0=Math.max(0,vx0)*ns,ry0=Math.max(0,vy0)*ns
-    const rx1=Math.min(dsw,vx1)*ns,ry1=Math.min(dsh,vy1)*ns
-    if(rx1>rx0&&ry1>ry0){
-      nc.strokeStyle='#ff4444';nc.lineWidth=1.5
-      nc.strokeRect(rx0+.5,ry0+.5,Math.max(1,rx1-rx0-1),Math.max(1,ry1-ry0-1))
+
+    // Draw viewport rect on top of whatever image is already in the navigator
+    const drawRect=()=>{
+      const el=drawAreaRef.current;if(!el)return
+      const daw=el.offsetWidth,dah=el.offsetHeight
+      const zoom=viewZoomRef.current/100
+      const px=panOffsetRef.current.x,py=panOffsetRef.current.y
+      const ns=nw/dsw
+      const cl=daw/2+px-dsw*zoom/2,ct=dah/2+py-dsh*zoom/2
+      const vx0=(-cl)/zoom,vy0=(-ct)/zoom
+      const vx1=(daw-cl)/zoom,vy1=(dah-ct)/zoom
+      const rx0=Math.max(0,vx0)*ns,ry0=Math.max(0,vy0)*ns
+      const rx1=Math.min(dsw,vx1)*ns,ry1=Math.min(dsh,vy1)*ns
+      if(rx1>rx0&&ry1>ry0){
+        nc.strokeStyle='#ff4444';nc.lineWidth=1.5*dpr
+        nc.strokeRect(rx0+.5,ry0+.5,Math.max(1,rx1-rx0-1),Math.max(1,ry1-ry0-1))
+      }
     }
+
+    // High-quality async downscale via createImageBitmap (Lanczos3 in Chromium)
+    // Generation counter ensures stale async results are discarded
+    const gen=++navGenRef.current
+    createImageBitmap(disp,{resizeWidth:nw,resizeHeight:nh,resizeQuality:'high'})
+      .then(bitmap=>{
+        if(navGenRef.current!==gen){bitmap.close();return}
+        nc.clearRect(0,0,nw,nh)
+        nc.drawImage(bitmap,0,0)
+        bitmap.close()
+        drawRect()
+      })
+      .catch(()=>{
+        // Fallback: multi-step sync downscale for browsers lacking resize options
+        if(navGenRef.current!==gen)return
+        nc.clearRect(0,0,nw,nh)
+        let src=disp,sw=disp.width,sh=disp.height,step=0
+        while(sw>nw*2||sh>nh*2){
+          const tw=Math.ceil(sw/2),th=Math.ceil(sh/2)
+          const prev=navIntermRef.current[step]
+          if(!prev||prev.width!==tw||prev.height!==th){
+            try{navIntermRef.current[step]=new OffscreenCanvas(tw,th)}
+            catch{const c=document.createElement('canvas');c.width=tw;c.height=th;navIntermRef.current[step]=c}
+          }
+          const interm=navIntermRef.current[step]
+          const tc=interm.getContext('2d')
+          tc.clearRect(0,0,tw,th)
+          tc.imageSmoothingEnabled=true;tc.imageSmoothingQuality='high'
+          tc.drawImage(src,0,0,tw,th)
+          src=interm;sw=tw;sh=th;step++
+        }
+        nc.imageSmoothingEnabled=true;nc.imageSmoothingQuality='high'
+        nc.drawImage(src,0,0,nw,nh)
+        drawRect()
+      })
   },[])
   const navUpdateRef=useRef(navUpdate)
   navUpdateRef.current=navUpdate
@@ -1042,9 +1159,15 @@ export default function App() {
   useEffect(()=>{
     const nav=navigatorRef.current;if(!nav)return
     const p=nav.parentElement;if(!p)return
+    const dpr=window.devicePixelRatio||1
     const w=p.clientWidth;if(!w)return
-    const h=Math.round(w*cvH/cvW)
-    if(nav.width!==w||nav.height!==h){nav.width=w;nav.height=h;navUpdate()}
+    const h=Math.round(w*cvH/cvW)          // CSS表示サイズ
+    const bw=Math.round(w*dpr),bh=Math.round(h*dpr)  // バッファサイズ（物理px）
+    if(nav.width!==bw||nav.height!==bh){
+      nav.width=bw;nav.height=bh
+      nav.style.height=h+'px'  // CSSの高さを明示（DPR≠1でも正しいサイズに）
+      navUpdate()
+    }
   },[cvW,cvH,navUpdate,dispSize])
   useEffect(()=>{comp()},[comp,showGrid,gridVisible,gridSize,gridOpacity])
   useEffect(()=>{comp()},[comp,refOpacity])
@@ -1084,7 +1207,8 @@ export default function App() {
       const mx=e.clientX-rect.left-rect.width/2
       const my=e.clientY-rect.top-rect.height/2
       const curZ=viewZoomRef.current/100
-      const newZRounded=Math.round(Math.min(400,Math.max(20,curZ*Math.pow(0.999,e.deltaY)*100)))
+      const dy=Math.sign(e.deltaY)*Math.min(Math.abs(e.deltaY),100)
+      const newZRounded=Math.round(Math.min(400,Math.max(20,curZ*Math.pow(0.999,dy)*100)))
       const newZ=newZRounded/100
       const cx=(mx-panOffsetRef.current.x)/curZ
       const cy=(my-panOffsetRef.current.y)/curZ
@@ -1105,11 +1229,12 @@ export default function App() {
     const onWheel=e=>{
       e.preventDefault()
       const curZ=viewZoomRef.current/100
-      setViewZoom(Math.round(Math.min(400,Math.max(20,curZ*Math.pow(0.999,e.deltaY)*100))))
+      const dy=Math.sign(e.deltaY)*Math.min(Math.abs(e.deltaY),100)
+      setViewZoom(Math.round(Math.min(400,Math.max(20,curZ*Math.pow(0.999,dy)*100))))
     }
     nav.addEventListener('wheel',onWheel,{passive:false})
     return()=>nav.removeEventListener('wheel',onWheel)
-  },[showLayerPanel])
+  },[])
 
   // ── Three.js scene ────────────────────────────────────────────
   useEffect(()=>{
@@ -1182,21 +1307,41 @@ export default function App() {
 
   const tick=useCallback(()=>setRev(r=>r+1),[])
 
-  const TOOL_SNAP=4
   const MOVE_SHIFT_STEP=8
-  const startToolDrag=useCallback((toolId,e,initialPos)=>{
-    const startMX=e.clientX,startMY=e.clientY
-    let latest=null
-    const move=me=>{
-      const raw_x=initialPos.x+(me.clientX-startMX),raw_y=initialPos.y+(me.clientY-startMY)
-      const nx=Math.round(raw_x/TOOL_SNAP)*TOOL_SNAP,ny=Math.round(raw_y/TOOL_SNAP)*TOOL_SNAP
-      setToolPositions(prev=>{latest={...prev,[toolId]:{x:nx,y:ny}};return latest})
+  const toolDragRef=useRef({idx:null,dropIdx:null,startX:0,moved:false})
+  const onToolGrab=useCallback((srcIdx,e)=>{
+    e.preventDefault();e.stopPropagation()
+    toolDragRef.current={idx:srcIdx,dropIdx:srcIdx,startX:e.clientX,moved:false}
+    setToolDragSrc(srcIdx)
+    const onMove=ev=>{
+      if(Math.abs(ev.clientX-toolDragRef.current.startX)>4)toolDragRef.current.moved=true
+      const el=document.querySelector('.toolbar-tools');if(!el)return
+      const items=[...el.querySelectorAll('.tool-drag-item')]
+      let drop=items.length
+      for(let i=0;i<items.length;i++){
+        const r=items[i].getBoundingClientRect()
+        if(ev.clientX<r.left+r.width/2){drop=i;break}
+      }
+      toolDragRef.current.dropIdx=drop;setToolDropIdx(drop)
     }
-    const up=()=>{
-      window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up)
-      if(latest)localStorage.setItem('tool-positions',JSON.stringify(latest))
+    const onUp=()=>{
+      const{idx:src,dropIdx:dst,moved}=toolDragRef.current
+      toolDragRef.current={idx:null,dropIdx:null,startX:0,moved:false}
+      setToolDragSrc(null);setToolDropIdx(null)
+      if(moved&&src!==null&&dst!==null&&src!==dst){
+        setToolOrder(prev=>{
+          const next=[...prev]
+          const[item]=next.splice(src,1)
+          next.splice(dst>src?dst-1:dst,0,item)
+          localStorage.setItem('tool-order',JSON.stringify(next))
+          return next
+        })
+      }
+      window.removeEventListener('pointermove',onMove)
+      window.removeEventListener('pointerup',onUp)
     }
-    window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)
+    window.addEventListener('pointermove',onMove)
+    window.addEventListener('pointerup',onUp)
   },[])
 
   // ── Navigator pointer handlers ─────────────────────────────────
@@ -1226,6 +1371,7 @@ export default function App() {
       case'ruler':return<TB label="定規" active={showRuler} onClick={()=>{if(showRuler){setShowRuler(false);setRulers([]);setActiveRulerId(null);placingRulerIdRef.current=null;placingRulerStartRef.current=null}else{setShowRuler(true);setActiveTool(TOOLS.RULER)}}}><RulerIcon/></TB>
       case'grid':return<TB label="マス目" active={showGrid} onClick={()=>{setShowGrid(v=>{if(!v)setGridVisible(true);return !v})}}><GridIcon/></TB>
       case'hand':return<TB label="手のひら移動 (H)" active={activeTool===TOOLS.HAND} onClick={()=>setActiveTool(TOOLS.HAND)}><HandIcon/></TB>
+      case'rotatecanvas':return<TB label="キャンバス回転" active={activeTool===TOOLS.ROTATE} onClick={()=>setActiveTool(TOOLS.ROTATE)}><RotateCanvasIcon/></TB>
       default:return null
     }
   },[activeTool,showRuler,showGrid])
@@ -1234,8 +1380,19 @@ export default function App() {
     const disp=displayRef.current;if(!disp)return{x:0,y:0}
     const r=disp.getBoundingClientRect()
     const {w:cw,h:ch}=cvRef.current
-    const rawX=(e.clientX-r.left)*(cw/r.width)
-    const rawY=(e.clientY-r.top)*(ch/r.height)
+    const θ=viewRotationRef.current*Math.PI/180
+    let rawX,rawY
+    if(!θ){
+      rawX=(e.clientX-r.left)*(cw/r.width)
+      rawY=(e.clientY-r.top)*(ch/r.height)
+    }else{
+      const cx=r.left+r.width/2,cy=r.top+r.height/2
+      const dx=e.clientX-cx,dy=e.clientY-cy
+      const ct=Math.cos(-θ),st=Math.sin(-θ)
+      const ux=dx*ct-dy*st,uy=dx*st+dy*ct
+      const dsw=dispSizeRef.current.w||cw,dsh=dispSizeRef.current.h||ch
+      rawX=(ux+dsw/2)*(cw/dsw);rawY=(uy+dsh/2)*(ch/dsh)
+    }
     let x=rawX
     if(rawX>=cw/2&&flipDrawRef.current)x=3*cw/2-rawX
     else if(rawX<cw/2&&flipPhotoRef.current)x=cw/2-rawX
@@ -1252,6 +1409,12 @@ export default function App() {
       e.preventDefault()
       const {rx,ry,rz,zoom}=S.current.practiceOrbit
       orbitDragStart.current={x:e.clientX,y:e.clientY,rx,ry,rz,zoom}
+      disp.setPointerCapture(e.pointerId);return
+    }
+    // Rotate canvas tool
+    if(S.current.activeTool===TOOLS.ROTATE){
+      e.preventDefault()
+      rotateStartRef.current={px:e.clientX,py:e.clientY,startRot:viewRotationRef.current}
       disp.setPointerCapture(e.pointerId);return
     }
     // Hand tool pan
@@ -1358,6 +1521,13 @@ export default function App() {
       if(e.shiftKey){setPracticeOrbit(o=>({...o,rz:s.rz+dx*.013}))}
       else{setPracticeOrbit(o=>({...o,rx:Math.max(-Math.PI*.48,Math.min(Math.PI*.48,s.rx-dy*.013)),ry:s.ry+dx*.013}))}
       return
+    }
+    // Rotate drag
+    if(rotateStartRef.current){
+      const dx=e.clientX-rotateStartRef.current.px
+      const raw=rotateStartRef.current.startRot+dx*0.4
+      const n=((raw%360)+360)%360
+      viewRotationRef.current=n;setViewRotation(n);return
     }
     // Pan drag
     if(panStartRef.current){
@@ -1466,6 +1636,7 @@ export default function App() {
 
   const onPointerUp=e=>{
     if(orbitDragStart.current){orbitDragStart.current=null;return}
+    if(rotateStartRef.current){rotateStartRef.current=null;return}
     if(panStartRef.current){panStartRef.current=null;return}
     if(!isDrawing.current)return;isDrawing.current=false
     const pt=toPt(e)
@@ -1610,72 +1781,181 @@ export default function App() {
   tabmateLearningRef.current = tabmateLearning
   tabmateMappingsRef.current = tabmateMappings
   tabmateActionsRef.current = {
-    pen:    ()=>setActiveTool(TOOLS.PEN),
-    eraser: ()=>setActiveTool(TOOLS.ERASER),
-    select: ()=>setActiveTool(TOOLS.SELECT),
-    move:   ()=>setActiveTool(TOOLS.MOVE),
-    line:   ()=>setActiveTool(TOOLS.LINE),
-    undo:   ()=>doUndoRef.current?.(),
-    redo:   ()=>doRedoRef.current?.(),
-    sizeUp: ()=>{const t=S.current.activeTool;if(t===TOOLS.ERASER)setEraserSize(v=>Math.min(200,v+5));else setPenSize(v=>Math.min(100,v+2))},
-    sizeDn: ()=>{const t=S.current.activeTool;if(t===TOOLS.ERASER)setEraserSize(v=>Math.max(1,v-5));else setPenSize(v=>Math.max(1,v-1))},
-    grid:   ()=>setShowGrid(v=>!v),
+    pen:      ()=>setActiveTool(TOOLS.PEN),
+    eraser:   ()=>setActiveTool(TOOLS.ERASER),
+    select:   ()=>setActiveTool(TOOLS.SELECT),
+    move:     ()=>setActiveTool(TOOLS.MOVE),
+    line:     ()=>setActiveTool(TOOLS.LINE),
+    hand:     ()=>setActiveTool(TOOLS.HAND),
+    ruler:    ()=>{
+      if(S.current.activeTool===TOOLS.RULER){setShowRuler(false);setRulers([]);setActiveRulerId(null)}
+      else{setShowRuler(true);setActiveTool(TOOLS.RULER)}
+    },
+    undo:     ()=>doUndoRef.current?.(),
+    redo:     ()=>doRedoRef.current?.(),
+    sizeUp:   ()=>{const t=S.current.activeTool;if(t===TOOLS.ERASER)setEraserSize(v=>Math.min(200,v+5));else setPenSize(v=>Math.min(100,v+2))},
+    sizeDn:   ()=>{const t=S.current.activeTool;if(t===TOOLS.ERASER)setEraserSize(v=>Math.max(1,v-5));else setPenSize(v=>Math.max(1,v-1))},
+    grid:     ()=>setShowGrid(v=>!v),
+    flipH:     ()=>{setFlipPhoto(v=>!v);setFlipDraw(v=>!v)},
+    flipPhoto: ()=>setFlipPhoto(v=>!v),
+    flipDraw:  ()=>setFlipDraw(v=>!v),
+    fitScreen:()=>{setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}},
+    zoomIn:      ()=>setViewZoom(v=>Math.min(400,Math.round(v*1.1))),
+    zoomOut:     ()=>setViewZoom(v=>Math.max(20,Math.round(v/1.1))),
+    rotateCanvas: ()=>setActiveTool(TOOLS.ROTATE),
+    rotateReset:  ()=>{viewRotationRef.current=0;setViewRotation(0)},
+    overlay:     ()=>{if(S.current.practiceMode)setPracticeOverlay(v=>!v);else setRefOverlay(v=>!v)},
   }
 
   useEffect(()=>{
     const fitScreen=()=>{setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}
     const h=e=>{
+      // Always intercept Ctrl+Z / Ctrl+Y as hardcoded undo/redo
       if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&e.key==='z'){e.preventDefault();doUndoRef.current();return}
       if((e.ctrlKey||e.metaKey)&&(e.key==='y'||(e.shiftKey&&e.key==='z'))){e.preventDefault();doRedoRef.current();return}
       if(e.target.matches('input,textarea,select'))return
-      // Shortcut capture mode
+      const fullKey=buildKeyStr(e)
+      // Live key monitor (shortcut panel open)
+      if(showShortcutPanelRef.current)setLiveKey(fullKey)
+      // Shortcut capture mode – allow any key including combos; Escape cancels
       if(scLearningRef.current){
-        if(e.ctrlKey||e.metaKey||e.altKey)return
+        if(e.key==='Escape'){scLearningRef.current=null;setScLearning(null);return}
+        // ignore lone modifier presses
+        if(['Control','Meta','Alt','Shift'].includes(e.key))return
         e.preventDefault()
         const action=scLearningRef.current
-        setShortcuts(prev=>{const nm={...prev,[action]:e.key};localStorage.setItem('key-shortcuts',JSON.stringify(nm));return nm})
+        setShortcuts(prev=>{const nm={...prev,[action]:fullKey};localStorage.setItem('key-shortcuts',JSON.stringify(nm));return nm})
         scLearningRef.current=null;setScLearning(null);return
       }
-      if(e.ctrlKey||e.metaKey||e.altKey||e.shiftKey)return
       const {activeTool,hardMode}=S.current
-      const sc=shortcutsRef.current,k=e.key
-      // spring tools (押しっぱなし一時切り替え)
-      if(sc.springEraser&&k===sc.springEraser&&!e.repeat&&!springToolRef.current){
-        springToolRef.current={key:k,from:activeTool};setActiveTool(TOOLS.ERASER);return
+      const sc=shortcutsRef.current
+      const modes=shortcutModesRef.current
+      // ── spring-mode helper ───────────────────────────────────────
+      const trySpring=(key,exec)=>{
+        if(!e.repeat&&!springToolRef.current){springToolRef.current={key,from:activeTool};exec()}
       }
-      if(sc.springHand&&k===sc.springHand&&!e.repeat&&!springToolRef.current){
-        springToolRef.current={key:k,from:activeTool};setActiveTool(TOOLS.HAND);return
+      // ── Legacy spring actions (backwards compat) ──────────────────
+      if(sc.springEraser&&fullKey===sc.springEraser){trySpring(e.key,()=>setActiveTool(TOOLS.ERASER));return}
+      if(sc.springHand  &&fullKey===sc.springHand)  {trySpring(e.key,()=>setActiveTool(TOOLS.HAND));return}
+      if(sc.springMove  &&fullKey===sc.springMove)  {trySpring(e.key,()=>setActiveTool(TOOLS.MOVE));return}
+      // ── Holdable tool actions ─────────────────────────────────────
+      const toolActs=[
+        {a:'pen',   guard:true,       exec:()=>setActiveTool(TOOLS.PEN)},
+        {a:'eraser',guard:!hardMode,  exec:()=>setActiveTool(TOOLS.ERASER)},
+        {a:'select',guard:!hardMode,  exec:()=>setActiveTool(TOOLS.SELECT)},
+        {a:'move',  guard:!hardMode,  exec:()=>setActiveTool(TOOLS.MOVE)},
+        {a:'line',  guard:!hardMode,  exec:()=>setActiveTool(TOOLS.LINE)},
+        {a:'hand',         guard:true, exec:()=>setActiveTool(TOOLS.HAND)},
+        {a:'rotateCanvas', guard:true, exec:()=>setActiveTool(TOOLS.ROTATE)},
+        {a:'ruler', guard:!hardMode,  exec:()=>{
+          if(activeTool===TOOLS.RULER){setShowRuler(false);setRulers([]);setActiveRulerId(null)}
+          else{setShowRuler(true);setActiveTool(TOOLS.RULER)}
+        }},
+      ]
+      let matched=false
+      for(const {a,guard,exec} of toolActs){
+        if(!sc[a]||fullKey!==sc[a]||!guard)continue
+        matched=true
+        const mt=getModeType(modes,a)
+        if(mt==='hold'){
+          trySpring(e.key,exec)
+        }else if(mt==='temporary'){
+          if(!e.repeat){
+            if(temporarySwitchRef.current[a]!==undefined){
+              setActiveTool(temporarySwitchRef.current[a])
+              delete temporarySwitchRef.current[a]
+            }else{
+              temporarySwitchRef.current[a]=activeTool
+              exec()
+            }
+          }
+        }else if(mt==='rotation'){
+          if(!e.repeat){
+            const list=getRotList(modes,a)
+            const ci=rotationIndexRef.current[a]||0
+            const ni=(ci+1)%list.length
+            rotationIndexRef.current[a]=ni
+            tabmateActionsRef.current[list[ni]]?.()
+          }
+        }else{
+          exec()
+        }
+        break
       }
-      if(sc.springMove&&k===sc.springMove&&!e.repeat&&!springToolRef.current){
-        springToolRef.current={key:k,from:activeTool};setActiveTool(TOOLS.MOVE);return
+      if(matched)return
+      // ── Actions with optional hold/rotation mode ──────────────────
+      const tryNonToolSpring=(key,onPress,onRelease)=>{
+        if(!e.repeat&&!nonToolSpringRef.current){
+          nonToolSpringRef.current={key,restore:onRelease};onPress()
+        }
       }
-      if(k===sc.pen){setActiveTool(TOOLS.PEN)}
-      else if(k===sc.eraser&&!hardMode){setActiveTool(TOOLS.ERASER)}
-      else if(k===sc.select&&!hardMode){setActiveTool(TOOLS.SELECT)}
-      else if(k===sc.move&&!hardMode){setActiveTool(TOOLS.MOVE)}
-      else if(k===sc.line&&!hardMode){setActiveTool(TOOLS.LINE)}
-      else if(k===sc.hand){setActiveTool(TOOLS.HAND)}
-      else if(k===sc.ruler&&!hardMode){
-        if(activeTool===TOOLS.RULER){setShowRuler(false);setRulers([]);setActiveRulerId(null)}
-        else{setShowRuler(true);setActiveTool(TOOLS.RULER)}
+      const doRotation=(key)=>{
+        if(!e.repeat){
+          const list=getRotList(modes,key)
+          const ci=rotationIndexRef.current[key]||0
+          const ni=(ci+1)%list.length
+          rotationIndexRef.current[key]=ni
+          tabmateActionsRef.current[list[ni]]?.()
+        }
       }
-      else if(k===sc.grid){setShowGrid(v=>{if(!v)setGridVisible(true);return !v})}
-      else if(k===sc.sizeUp){
+      if(sc.grid&&fullKey===sc.grid){
+        const mt=getModeType(modes,'grid')
+        if(mt==='hold')tryNonToolSpring(e.key,()=>{setGridVisible(true);setShowGrid(true)},()=>{setShowGrid(v=>S.current.showGrid?!v:v)})
+        else if(mt==='rotation')doRotation('grid')
+        else setShowGrid(v=>{if(!v)setGridVisible(true);return !v})
+      }
+      else if(sc.fitScreen&&fullKey===sc.fitScreen){
+        if(getModeType(modes,'fitScreen')==='rotation')doRotation('fitScreen')
+        else fitScreen()
+      }
+      else if(sc.flipH&&fullKey===sc.flipH){
+        const mt=getModeType(modes,'flipH')
+        if(mt==='hold')tryNonToolSpring(e.key,()=>{setFlipPhoto(true);setFlipDraw(true)},()=>{setFlipPhoto(false);setFlipDraw(false)})
+        else if(mt==='rotation')doRotation('flipH')
+        else{setFlipPhoto(v=>!v);setFlipDraw(v=>!v)}
+      }
+      else if(sc.flipPhoto&&fullKey===sc.flipPhoto){
+        const mt=getModeType(modes,'flipPhoto')
+        if(mt==='hold')tryNonToolSpring(e.key,()=>setFlipPhoto(true),()=>setFlipPhoto(false))
+        else if(mt==='rotation')doRotation('flipPhoto')
+        else setFlipPhoto(v=>!v)
+      }
+      else if(sc.flipDraw&&fullKey===sc.flipDraw){
+        const mt=getModeType(modes,'flipDraw')
+        if(mt==='hold')tryNonToolSpring(e.key,()=>setFlipDraw(true),()=>setFlipDraw(false))
+        else if(mt==='rotation')doRotation('flipDraw')
+        else setFlipDraw(v=>!v)
+      }
+      else if(sc.overlay&&fullKey===sc.overlay){
+        const isPractice=S.current.practiceMode
+        const mt=getModeType(modes,'overlay')
+        if(mt==='hold')tryNonToolSpring(e.key,
+          ()=>{isPractice?setPracticeOverlay(true):setRefOverlay(true)},
+          ()=>{isPractice?setPracticeOverlay(false):setRefOverlay(false)})
+        else if(mt==='rotation')doRotation('overlay')
+        else{isPractice?setPracticeOverlay(v=>!v):setRefOverlay(v=>!v)}
+      }
+      // ── Non-holdable actions ──────────────────────────────────────
+      else if(fullKey===sc.sizeUp){
         if(activeTool===TOOLS.ERASER)setEraserSize(v=>Math.min(200,v+5))
         else setPenSize(v=>Math.min(100,v+1))
       }
-      else if(k===sc.sizeDn){
+      else if(fullKey===sc.sizeDn){
         if(activeTool===TOOLS.ERASER)setEraserSize(v=>Math.max(1,v-5))
         else setPenSize(v=>Math.max(1,v-1))
       }
-      else if(sc.undo&&k===sc.undo){doUndoRef.current()}
-      else if(sc.redo&&k===sc.redo){doRedoRef.current()}
-      else if(sc.fitScreen&&k===sc.fitScreen){fitScreen()}
-      else if(sc.flipH&&k===sc.flipH){setFlipDraw(v=>!v)}
+      else if(sc.undo&&fullKey===sc.undo){doUndoRef.current()}
+      else if(sc.redo&&fullKey===sc.redo){doRedoRef.current()}
+      else if(sc.zoomIn&&fullKey===sc.zoomIn){setViewZoom(v=>Math.min(400,Math.round(v*1.1)))}
+      else if(sc.zoomOut&&fullKey===sc.zoomOut){setViewZoom(v=>Math.max(20,Math.round(v/1.1)))}
+      else if(sc.rotateReset&&fullKey===sc.rotateReset){viewRotationRef.current=0;setViewRotation(0)}
     }
     const onKeyUp=e=>{
       if(springToolRef.current&&e.key===springToolRef.current.key){
         const from=springToolRef.current.from;springToolRef.current=null;setActiveTool(from)
+      }
+      if(nonToolSpringRef.current&&e.key===nonToolSpringRef.current.key){
+        nonToolSpringRef.current.restore();nonToolSpringRef.current=null
       }
     }
     const onShiftDn=e=>{if(e.key==='Shift'){shiftKeyRef.current=true;compRef.current?.()}}
@@ -1697,13 +1977,18 @@ export default function App() {
     const data = Array.from(new Uint8Array(e.data.buffer))
     const rid  = e.reportId
     const prev = tabmateLastReport.current
-    const changes = prev
-      ? data.reduce((acc,v,i)=>{ if(v!==prev[i]&&v!==0) acc.push({i,v}); return acc },[])
+    // Track ALL changes — press (v≠0) and release (v=0)
+    const allChanges = prev
+      ? data.reduce((acc,v,i)=>{ if(v!==prev[i]) acc.push({i,v}); return acc },[])
       : []
     tabmateLastReport.current = data
-    if(!changes.length) return
+    if(!allChanges.length) return
+    const presses  = allChanges.filter(c=>c.v!==0)
+    const releases = allChanges.filter(c=>c.v===0)
+    // ── Learning mode (press only) ────────────────────────────────
     if(tabmateLearningRef.current){
-      const {i,v} = changes[0]
+      if(!presses.length) return
+      const {i,v} = presses[0]
       const key = `${rid}:${i}:${v}`
       const nm = {...tabmateMappingsRef.current, [key]: tabmateLearningRef.current}
       tabmateMappingsRef.current = nm
@@ -1713,9 +1998,45 @@ export default function App() {
       setTabmateLearning(null)
       return
     }
-    for(const {i,v} of changes){
-      const action = tabmateMappingsRef.current[`${rid}:${i}:${v}`]
-      if(action) tabmateActionsRef.current[action]?.()
+    // ── Releases → spring restore ─────────────────────────────────
+    for(const {i} of releases){
+      const prevVal = prev?.[i]; if(!prevVal) continue
+      const btnKey = `${rid}:${i}:${prevVal}`
+      if(tabmateSpringRef.current?.btnKey===btnKey){
+        const fromTool = tabmateSpringRef.current.from
+        tabmateSpringRef.current = null
+        setActiveTool(fromTool)
+      }
+    }
+    // ── Presses → execute action ──────────────────────────────────
+    const TOOL_CONSTS={pen:TOOLS.PEN,eraser:TOOLS.ERASER,select:TOOLS.SELECT,move:TOOLS.MOVE,line:TOOLS.LINE,ruler:TOOLS.RULER,hand:TOOLS.HAND,rotateCanvas:TOOLS.ROTATE}
+    for(const {i,v} of presses){
+      const btnKey = `${rid}:${i}:${v}`
+      const action = tabmateMappingsRef.current[btnKey]; if(!action) continue
+      const mt = getModeType(shortcutModesRef.current, action)
+      if(mt==='hold'){
+        if(!tabmateSpringRef.current){
+          tabmateSpringRef.current = {btnKey, from: S.current.activeTool}
+          tabmateActionsRef.current[action]?.()
+        }
+      }else if(mt==='temporary'){
+        const toolConst=TOOL_CONSTS[action]
+        if(toolConst&&S.current.activeTool===toolConst&&temporarySwitchRef.current[action]!==undefined){
+          setActiveTool(temporarySwitchRef.current[action])
+          delete temporarySwitchRef.current[action]
+        }else{
+          if(toolConst)temporarySwitchRef.current[action]=S.current.activeTool
+          tabmateActionsRef.current[action]?.()
+        }
+      }else if(mt==='rotation'){
+        const list=getRotList(shortcutModesRef.current,action)
+        const ci=rotationIndexRef.current[action]||0
+        const ni=(ci+1)%list.length
+        rotationIndexRef.current[action]=ni
+        tabmateActionsRef.current[list[ni]]?.()
+      }else{
+        tabmateActionsRef.current[action]?.()
+      }
     }
   },[])
 
@@ -1741,6 +2062,31 @@ export default function App() {
   },[handleTabmateReport])
 
   useEffect(()=>()=>{ disconnectTabmate() },[disconnectTabmate])
+
+  // Auto-reconnect: re-open a previously authorized device on page load
+  useEffect(()=>{
+    if(!navigator.hid) return
+    navigator.hid.getDevices().then(async devices=>{
+      for(const device of devices){
+        try{
+          await device.open()
+          device.addEventListener('inputreport', handleTabmateReport)
+          tabmateDeviceRef.current = device
+          tabmateLastReport.current = null
+          setTabmateConnected(true)
+          break
+        }catch{}
+      }
+    }).catch(()=>{})
+  },[handleTabmateReport])
+
+  // Close trigger dropdown on click-outside
+  useEffect(()=>{
+    if(!triggerMenuOpen)return
+    const close=e=>{if(!e.target.closest('.sc-trigger-wrap'))setTriggerMenuOpen(null)}
+    document.addEventListener('mousedown',close)
+    return()=>document.removeEventListener('mousedown',close)
+  },[triggerMenuOpen])
 
   // ── URL / file ────────────────────────────────────────────────
   const IMAGE_EXTS=/\.(jpe?g|png|gif|webp|bmp|svg|avif)(\?.*)?$/i
@@ -2048,7 +2394,7 @@ export default function App() {
   const activeLayer=layers.find(l=>l.id===activeLayerId)
   const selCanvasEl=displayRef.current
   const xfCanvasEl=displayRef.current
-  const cursor={[TOOLS.PEN]:'none',[TOOLS.ERASER]:'none',[TOOLS.MOVE]:'move',[TOOLS.SELECT]:'crosshair',[TOOLS.LINE]:'crosshair',[TOOLS.RULER]:'crosshair',[TOOLS.HAND]:panStartRef.current?'grabbing':'grab'}[activeTool]
+  const cursor={[TOOLS.PEN]:'none',[TOOLS.ERASER]:'none',[TOOLS.MOVE]:'move',[TOOLS.SELECT]:'crosshair',[TOOLS.LINE]:'crosshair',[TOOLS.RULER]:'crosshair',[TOOLS.HAND]:panStartRef.current?'grabbing':'grab',[TOOLS.ROTATE]:rotateStartRef.current?'grabbing':'ew-resize'}[activeTool]
 
   const buildListItems=()=>{
     const items=[],dlRev=[...drawingLayers].reverse()
@@ -2091,8 +2437,8 @@ export default function App() {
             <button className="app-menu-item" onClick={()=>{setLeftHanded(v=>!v);setShowMenu(false)}}>
               {leftHanded?'右利きモード（通常）':'左利きモード（左右反転）'}
             </button>
-            <button className="app-menu-item" onClick={()=>{setShowLayerPanel(v=>!v);setShowMenu(false)}}>
-              {showLayerPanel?'レイヤーパネルを隠す':'レイヤーパネルを表示'}
+            <button className="app-menu-item" onClick={()=>{setEditToolLayout(true);setShowMenu(false)}}>
+              🔧 配置をカスタマイズ
             </button>
             <div className="app-menu-sep"/>
             <button className={`app-menu-item${hardMode?' app-menu-item--active':''}`}
@@ -2101,14 +2447,10 @@ export default function App() {
             </button>
             <div className="app-menu-sep"/>
             <button className="app-menu-item" onClick={()=>{setShowTabmatePanel(v=>!v);setShowMenu(false)}}>
-              {tabmateConnected?'● ':'○ '}Tabmate設定
+              {tabmateConnected?'● ':'○ '}片手デバイス設定
             </button>
             <button className="app-menu-item" onClick={()=>{setShowShortcutPanel(v=>!v);setShowMenu(false)}}>
               ⌨ ショートカット設定
-            </button>
-            <div className="app-menu-sep"/>
-            <button className="app-menu-item" onClick={()=>{setEditToolLayout(true);setShowMenu(false)}}>
-              🔧 ツール配置をカスタマイズ
             </button>
           </div>
         </div>
@@ -2116,34 +2458,18 @@ export default function App() {
 
       {editToolLayout&&(
         <div className="tool-layout-bar">
-          <span>ツール配置編集中 — ドラッグで移動、ダブルクリックでツールバーに戻す</span>
-          <button className="tl-btn" onClick={()=>{setToolPositions({});localStorage.setItem('tool-positions','{}')}} title="全てツールバーに戻す">リセット</button>
+          <span>配置編集中 — ドラッグして並べ替え</span>
+          <button className="tl-btn" onClick={()=>setSidebarLeft(v=>!v)} title="サイドバーを左右に移動">{sidebarLeft?'サイドバー ▶ 右へ':'◀ 左へ'}</button>
+          <button className="tl-btn" onClick={()=>{setToolOrder([...TOOL_IDS]);localStorage.removeItem('tool-order')}} title="並び順をリセット">リセット</button>
           <button className="tl-btn tl-btn-done" onClick={()=>setEditToolLayout(false)}>完了</button>
         </div>
       )}
-
-      {Object.entries(toolPositions).map(([id,pos])=>{
-        if(id!=='pen'&&hardMode)return null
-        return(
-          <div key={id} style={{position:'fixed',left:pos.x,top:pos.y,zIndex:1100,
-            cursor:editToolLayout?'move':'default',
-            outline:editToolLayout?'2px dashed #6af':'none',
-            outlineOffset:editToolLayout?'2px':'0',borderRadius:4}}
-            onPointerDown={editToolLayout?e=>{e.preventDefault();startToolDrag(id,e,pos)}:undefined}
-            onDoubleClick={editToolLayout?()=>setToolPositions(prev=>{const n={...prev};delete n[id];localStorage.setItem('tool-positions',JSON.stringify(n));return n}):undefined}>
-            <div style={{position:'relative'}}>
-              {makeToolButton(id)}
-              {editToolLayout&&<div style={{position:'absolute',inset:0,cursor:'move'}}/>}
-            </div>
-          </div>
-        )
-      })}
 
       {showTabmatePanel&&(
         <div className="tabmate-overlay" onClick={()=>setShowTabmatePanel(false)}>
           <div className="tabmate-panel" onClick={e=>e.stopPropagation()}>
             <div className="tabmate-hdr">
-              <span>Tabmate 設定</span>
+              <span>片手デバイス設定</span>
               <button className="tabmate-close" onClick={()=>setShowTabmatePanel(false)}>✕</button>
             </div>
             <div className="tabmate-conn">
@@ -2154,45 +2480,66 @@ export default function App() {
                   <button className="tabmate-disc-btn" onClick={disconnectTabmate}>切断</button>
                 </>
               ):(
-                <button className="tabmate-connect-btn" onClick={connectTabmate}>デバイスを接続（WebHID）</button>
+                <button className="tabmate-connect-btn" onClick={connectTabmate}>片手デバイスを接続（WebHID）</button>
               )}
             </div>
             {tabmateConnected&&(
               <div className="tabmate-map-list">
-                <p className="tabmate-hint">各アクションのボタンを押して割り当て。もう一度押すとキャンセル。</p>
-                {[
-                  {a:'pen',    l:'ペン'},
-                  {a:'eraser', l:'消しゴム'},
-                  {a:'select', l:'選択範囲'},
-                  {a:'move',   l:'レイヤー移動'},
-                  {a:'line',   l:'直線'},
-                  {a:'undo',   l:'元に戻す'},
-                  {a:'redo',   l:'やり直し'},
-                  {a:'sizeUp', l:'サイズ大'},
-                  {a:'sizeDn', l:'サイズ小'},
-                  {a:'grid',   l:'マス目切替'},
-                ].map(({a,l})=>{
-                  const mapped=Object.entries(tabmateMappings).find(([,v])=>v===a)
-                  const learning=tabmateLearning===a
+                <p className="tabmate-hint">「割り当て」を押してからTabmateボタンを押してください。もう一度押すとキャンセル。</p>
+                {SC_GROUPS.map(({key:gk,label:gl})=>{
+                  const isOpen=openGroups.includes(gk)
                   return(
-                    <div key={a} className="tabmate-row">
-                      <span className="tabmate-action">{l}</span>
-                      <button
-                        className={`tabmate-learn-btn${learning?' learning':''}`}
-                        onClick={()=>{
-                          const next=learning?null:a
-                          setTabmateLearning(next)
-                          tabmateLearningRef.current=next
-                        }}>
-                        {learning?'ボタンを押して…':mapped?'設定済み':'未設定'}
+                    <div key={gk} className="sc-group">
+                      <button className="sc-group-hdr" onClick={()=>toggleGroup(gk)}>
+                        {gl}<span className="sc-group-arrow">{isOpen?'▲':'▼'}</span>
                       </button>
-                      {mapped&&!learning&&(
-                        <button className="tabmate-clear-btn" title="削除" onClick={()=>{
-                          const nm={...tabmateMappings};delete nm[mapped[0]]
-                          setTabmateMappings(nm);tabmateMappingsRef.current=nm
-                          localStorage.setItem('tabmate-mappings',JSON.stringify(nm))
-                        }}>✕</button>
-                      )}
+                      {isOpen&&SHORTCUT_ACTIONS.filter(x=>x.g===gk).map(({a,l})=>{
+                        const mapped=Object.entries(tabmateMappings).find(([,v])=>v===a)
+                        const learning=tabmateLearning===a
+                        const modeType=getModeType(shortcutModes,a)
+                        const rotList=getRotList(shortcutModes,a)
+                        const setModeFn=type=>{
+                          const nm={...shortcutModes}
+                          if(type==='default'){delete nm[a]}
+                          else if(type==='rotation'){const ex=typeof nm[a]==='object'&&nm[a].type==='rotation'?nm[a].list:[a];nm[a]={type:'rotation',list:ex}}
+                          else{nm[a]=type}
+                          setShortcutModes(nm);localStorage.setItem('shortcut-modes',JSON.stringify(nm))
+                        }
+                        const modeLabel=modeType==='default'?'デフォルト':modeType==='temporary'?'一時切替':modeType==='hold'?'ホールド':'ローテーション'
+                        return(
+                          <div key={a} className="tabmate-row sc-row-wrap">
+                            <span className="tabmate-action">{l}</span>
+                            <button className={`tabmate-learn-btn${learning?' learning':mapped?' configured':''}`}
+                              onClick={()=>{const next=learning?null:a;setTabmateLearning(next);tabmateLearningRef.current=next}}>
+                              {learning?'ボタンを押して…':mapped?'設定済み':'未設定'}
+                            </button>
+                            <div className="sc-trigger-wrap">
+                              <button className={`sc-trigger-cycle${modeType!=='default'?' sc-trigger-cycle--'+modeType:''}`}
+                                onClick={()=>setTriggerMenuOpen(triggerMenuOpen===a?null:a)}>
+                                {modeLabel} ▾
+                              </button>
+                              {triggerMenuOpen===a&&(
+                                <div className="sc-trigger-dropdown">
+                                  <button className={`sc-trigger-item${modeType==='default'?' active':''}`}   title="押すたびにアクション実行" onClick={()=>{setModeFn('default');setTriggerMenuOpen(null)}}>デフォルト</button>
+                                  <button className={`sc-trigger-item${modeType==='temporary'?' active':''}`} title="1回で切替・もう1回で戻る" onClick={()=>{setModeFn('temporary');setTriggerMenuOpen(null)}}>一時切り替え</button>
+                                  <button className={`sc-trigger-item${modeType==='hold'?' active':''}`}      title="押中だけ切替・離すと戻る" onClick={()=>{setModeFn('hold');setTriggerMenuOpen(null)}}>ホールド</button>
+                                  <button className={`sc-trigger-item${modeType==='rotation'?' active':''}`}  title="押すたびに順番切替"       onClick={()=>{setModeFn('rotation');setTriggerMenuOpen(null)}}>ローテーション</button>
+                                </div>
+                              )}
+                              {modeType==='rotation'&&(
+                                <button className="sc-rot-edit-btn" onClick={()=>setRotationEditOpen(a)} title="ローテーション順序を設定">☰</button>
+                              )}
+                            </div>
+                            {mapped&&!learning&&(
+                              <button className="tabmate-clear-btn" title="削除" onClick={()=>{
+                                const nm={...tabmateMappings};delete nm[mapped[0]]
+                                setTabmateMappings(nm);tabmateMappingsRef.current=nm
+                                localStorage.setItem('tabmate-mappings',JSON.stringify(nm))
+                              }}>✕</button>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                   )
                 })}
@@ -2202,31 +2549,119 @@ export default function App() {
         </div>
       )}
 
+      {rotationEditOpen&&(()=>{
+        const a=rotationEditOpen
+        const rotList=getRotList(shortcutModes,a)
+        const availableActions=SHORTCUT_ACTIONS.filter(({a:ra})=>!rotList.includes(ra))
+        return(
+          <div className="tabmate-overlay" style={{zIndex:1600}} onClick={()=>{setRotationEditOpen(null);setRotationAddAction('')}}>
+            <div className="tabmate-panel rot-editor-panel" onClick={e=>e.stopPropagation()}>
+              <div className="tabmate-hdr">
+                <span>ローテーション順序設定</span>
+                <button className="tabmate-close" onClick={()=>{setRotationEditOpen(null);setRotationAddAction('')}}>✕</button>
+              </div>
+              <div className="rot-editor-body">
+                {rotList.map((ra,ri)=>{
+                  const label=SHORTCUT_ACTIONS.find(x=>x.a===ra)?.l||ra
+                  const isPrimary=ra===a
+                  return(
+                    <div key={ra} className="rot-editor-row">
+                      <span className="rot-editor-num">{ri+1}</span>
+                      <span className={`rot-editor-lbl${isPrimary?' rot-editor-primary':''}`}>{label}</span>
+                      <button className="rot-editor-mv" disabled={ri===0}
+                        onClick={()=>{const nl=[...rotList];[nl[ri],nl[ri-1]]=[nl[ri-1],nl[ri]];setRotationListFn(a,nl)}}>↑</button>
+                      <button className="rot-editor-mv" disabled={ri===rotList.length-1}
+                        onClick={()=>{const nl=[...rotList];[nl[ri],nl[ri+1]]=[nl[ri+1],nl[ri]];setRotationListFn(a,nl)}}>↓</button>
+                      {!isPrimary&&<button className="rot-editor-rm"
+                        onClick={()=>setRotationListFn(a,rotList.filter((_,i)=>i!==ri))}>✕</button>}
+                    </div>
+                  )
+                })}
+                <div className="rot-editor-add">
+                  <select value={rotationAddAction} onChange={e=>setRotationAddAction(e.target.value)}>
+                    <option value="">— 追加するアクションを選択 —</option>
+                    {availableActions.map(({a:ra,l:rl})=><option key={ra} value={ra}>{rl}</option>)}
+                  </select>
+                  <button className="rot-editor-add-btn" disabled={!rotationAddAction}
+                    onClick={()=>{
+                      if(rotationAddAction&&!rotList.includes(rotationAddAction)){
+                        setRotationListFn(a,[...rotList,rotationAddAction])
+                        setRotationAddAction('')
+                      }
+                    }}>追加</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {showShortcutPanel&&(
-        <div className="tabmate-overlay" onClick={()=>{setShowShortcutPanel(false);setScLearning(null)}}>
-          <div className="tabmate-panel" onClick={e=>e.stopPropagation()} style={{minWidth:340}}>
+        <div className="tabmate-overlay" onClick={()=>{setShowShortcutPanel(false);setScLearning(null);scLearningRef.current=null;setLiveKey(null)}}>
+          <div className="tabmate-panel" onClick={e=>e.stopPropagation()} style={{minWidth:440}}>
             <div className="tabmate-hdr">
               ショートカット設定
-              <button className="tabmate-close" onClick={()=>{setShowShortcutPanel(false);setScLearning(null)}}>✕</button>
+              <button className="tabmate-close" onClick={()=>{setShowShortcutPanel(false);setScLearning(null);scLearningRef.current=null;setLiveKey(null)}}>✕</button>
             </div>
             <div className="tabmate-map-list">
-              <p className="tabmate-hint">「割り当て」を押してからキーを押すと変更できます。</p>
-              {SHORTCUT_ACTIONS.map(({a,l})=>{
-                const key=shortcuts[a]??DEFAULT_SHORTCUTS[a]
-                const learning=scLearning===a
+              <p className="tabmate-hint">「割り当て」を押してからキー（または Ctrl/Alt/Shift との組み合わせ）を押してください。Esc でキャンセル。</p>
+              <div className="sc-livekey-row">
+                <span className="sc-livekey-label">受信中のキー</span>
+                <span className={`sc-livekey-val${liveKey?' active':''}`}>{liveKey?fmtKey(liveKey):'—'}</span>
+              </div>
+              {SC_GROUPS.map(({key:gk,label:gl})=>{
+                const isOpen=openGroups.includes(gk)
                 return(
-                  <div key={a} className="tabmate-row">
-                    <span className="tabmate-action">{l}</span>
-                    <span className="sc-key">{key}</span>
-                    <button className={`tabmate-learn-btn${learning?' learning':''}`}
-                      onClick={()=>{const next=learning?null:a;setScLearning(next);scLearningRef.current=next}}>
-                      {learning?'キーを押して…':'割り当て'}
+                  <div key={gk} className="sc-group">
+                    <button className="sc-group-hdr" onClick={()=>toggleGroup(gk)}>
+                      {gl}<span className="sc-group-arrow">{isOpen?'▲':'▼'}</span>
                     </button>
-                    <button className="tabmate-clear-btn" title="デフォルトに戻す" onClick={()=>{
-                      const nm={...shortcuts};delete nm[a]
-                      const merged={...DEFAULT_SHORTCUTS,...nm}
-                      setShortcuts(merged);localStorage.setItem('key-shortcuts',JSON.stringify(nm))
-                    }}>↩</button>
+                    {isOpen&&SHORTCUT_ACTIONS.filter(x=>x.g===gk).map(({a,l})=>{
+                      const scKey=shortcuts[a]??DEFAULT_SHORTCUTS[a]
+                      const learning=scLearning===a
+                      const modeType=getModeType(shortcutModes,a)
+                      const rotList=getRotList(shortcutModes,a)
+                      const setModeFn=type=>{
+                        const nm={...shortcutModes}
+                        if(type==='default'){delete nm[a]}
+                        else if(type==='rotation'){const ex=typeof nm[a]==='object'&&nm[a].type==='rotation'?nm[a].list:[a];nm[a]={type:'rotation',list:ex}}
+                        else{nm[a]=type}
+                        setShortcutModes(nm);localStorage.setItem('shortcut-modes',JSON.stringify(nm))
+                      }
+                      const modeLabel=modeType==='default'?'デフォルト':modeType==='temporary'?'一時切替':modeType==='hold'?'ホールド':'ローテーション'
+                      return(
+                        <div key={a} className="tabmate-row sc-row-wrap">
+                          <span className="tabmate-action">{l}</span>
+                          <span className={`sc-key${scKey?' sc-key--set':''}`}>{fmtKey(scKey)}</span>
+                          <button className={`tabmate-learn-btn${learning?' learning':''}`}
+                            onClick={()=>{const next=learning?null:a;setScLearning(next);scLearningRef.current=next}}>
+                            {learning?'押して… (Esc=取消)':'割り当て'}
+                          </button>
+                          <div className="sc-trigger-wrap">
+                            <button className={`sc-trigger-cycle${modeType!=='default'?' sc-trigger-cycle--'+modeType:''}`}
+                              onClick={()=>setTriggerMenuOpen(triggerMenuOpen===a?null:a)}>
+                              {modeLabel} ▾
+                            </button>
+                            {triggerMenuOpen===a&&(
+                              <div className="sc-trigger-dropdown">
+                                <button className={`sc-trigger-item${modeType==='default'?' active':''}`}   title="押すたびにアクション実行" onClick={()=>{setModeFn('default');setTriggerMenuOpen(null)}}>デフォルト</button>
+                                <button className={`sc-trigger-item${modeType==='temporary'?' active':''}`} title="1回で切替・もう1回で戻る" onClick={()=>{setModeFn('temporary');setTriggerMenuOpen(null)}}>一時切り替え</button>
+                                <button className={`sc-trigger-item${modeType==='hold'?' active':''}`}      title="押中だけ切替・離すと戻る" onClick={()=>{setModeFn('hold');setTriggerMenuOpen(null)}}>ホールド</button>
+                                <button className={`sc-trigger-item${modeType==='rotation'?' active':''}`}  title="押すたびに順番切替"       onClick={()=>{setModeFn('rotation');setTriggerMenuOpen(null)}}>ローテーション</button>
+                              </div>
+                            )}
+                            {modeType==='rotation'&&(
+                              <button className="sc-rot-edit-btn" onClick={()=>setRotationEditOpen(a)} title="ローテーション順序を設定">☰</button>
+                            )}
+                          </div>
+                          <button className="tabmate-clear-btn" title="キーをデフォルトに戻す" onClick={()=>{
+                            const nm={...shortcuts};delete nm[a]
+                            const merged={...DEFAULT_SHORTCUTS,...nm}
+                            setShortcuts(merged);localStorage.setItem('key-shortcuts',JSON.stringify(nm))
+                          }}>↩</button>
+                        </div>
+                      )
+                    })}
                   </div>
                 )
               })}
@@ -2244,23 +2679,16 @@ export default function App() {
         <div className="tb-spacer"/>
         <div className="toolbar-right">
           <div className="toolbar-tools">
-            {TOOL_IDS.map(id=>{
+            {toolOrder.map((id,idx)=>{
               if(id!=='pen'&&hardMode)return null
-              if(toolPositions[id])return null
+              const isDragging=toolDragSrc===idx
+              const isDropTarget=toolDropIdx===idx&&toolDragSrc!==null&&toolDragSrc!==idx
               return(
                 <div key={id}
-                  onPointerDown={editToolLayout?e=>{
-                    e.preventDefault()
-                    const r=e.currentTarget.getBoundingClientRect()
-                    const ip={x:r.left,y:r.top}
-                    setToolPositions(prev=>{const n={...prev,[id]:ip};localStorage.setItem('tool-positions',JSON.stringify(n));return n})
-                    startToolDrag(id,e,ip)
-                  }:undefined}
-                  style={editToolLayout?{cursor:'move',outline:'2px dashed #6af',outlineOffset:'2px',borderRadius:4}:undefined}>
-                  <div style={{position:'relative'}}>
-                    {makeToolButton(id)}
-                    {editToolLayout&&<div style={{position:'absolute',inset:0,cursor:'move'}}/>}
-                  </div>
+                  className={`tool-drag-item${isDragging?' tool-dragging':''}${isDropTarget?' tool-drop-here':''}`}
+                  onPointerDown={editToolLayout?e=>onToolGrab(idx,e):undefined}
+                  style={editToolLayout?{cursor:'grab',outline:'2px dashed #6af',outlineOffset:'2px',borderRadius:4}:undefined}>
+                  {makeToolButton(id)}
                 </div>
               )
             })}
@@ -2281,11 +2709,11 @@ export default function App() {
       <div className="main">
         <div className="content">
           <div className="draw-area" ref={drawAreaRef}>
-            {customizeMode&&<div className="customize-canvas-block" title="カスタマイズモード中は描画できません"><span>カスタマイズ中</span></div>}
-            <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
+            {editToolLayout&&<div className="customize-canvas-block" title="カスタマイズモード中は描画できません"><span>カスタマイズ中</span></div>}
+            <div style={{position:'absolute',inset:4,display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
               <div style={{position:'relative',flexShrink:0,
                 width:dispSize.w||cvW,height:dispSize.h||cvH,
-                transform:`translate(${panOffset.x}px,${panOffset.y}px) scale(${viewZoom/100})`,
+                transform:`translate(${panOffset.x}px,${panOffset.y}px) scale(${viewZoom/100}) rotate(${viewRotation}deg)`,
                 transformOrigin:'center'}}>
                 <canvas ref={displayRef} width={cvW} height={cvH}
                   style={{width:'100%',height:'100%',display:'block',cursor,touchAction:'none'}}
@@ -2410,9 +2838,14 @@ export default function App() {
               <span className="bb-sep"/>
             </>}
             <label className="bb-label">表示</label>
-            <input type="range" min="20" max="400" value={viewZoom} onChange={e=>setViewZoom(+e.target.value)} className="zoom-slider" title="表示サイズ (二本指スクロールでズーム)"/>
+            <input type="range" min="20" max="400" value={viewZoom} onChange={e=>setViewZoom(+e.target.value)} className="zoom-slider" title="表示サイズ"/>
             <span className="bb-val">{viewZoom}%</span>
-            {(viewZoom!==100||panOffset.x||panOffset.y)&&<button className="bb-reset-btn" onClick={()=>{setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}} title="表示位置・ズームをリセット">⟳</button>}
+            {(viewZoom!==100||panOffset.x!==0||panOffset.y!==0)&&<button className="bb-reset-btn" onClick={()=>{setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}} title="表示位置・拡大率をリセット">⟳</button>}
+            {viewRotation!==0&&<>
+              <span className="bb-sep"/>
+              <span className="bb-val" style={{minWidth:36,textAlign:'center'}} title="キャンバス回転角度">{Math.round(viewRotation)}°</span>
+              <button className="bb-reset-btn" onClick={()=>{viewRotationRef.current=0;setViewRotation(0)}} title="角度をリセット">↺</button>
+            </>}
             <button className={`bb-crop-btn${flipPhoto?' bb-crop-reset':''}`} onClick={()=>setFlipPhoto(v=>!v)} title="参考画像を左右反転"><FlipHIcon/></button>
             <button className={`bb-crop-btn${flipDraw?' bb-crop-reset':''}`} onClick={()=>setFlipDraw(v=>!v)} title="描画エリアを左右反転"><FlipHIcon/></button>
             <button className={`bb-crop-btn${flipPhoto&&flipDraw?' bb-crop-reset':''}`} onClick={()=>{const b=!(flipPhoto&&flipDraw);setFlipPhoto(b);setFlipDraw(b)}} title="両方を左右反転"><FlipBothIcon/></button>
@@ -2442,27 +2875,13 @@ export default function App() {
           </div>
         </div>
 
-        {showLayerPanel&&(
-          <div className={`sidebar-col${sidebarLeft?' sidebar-col--left':''}`}>
-            {/* ── サイドバー操作バー ─── */}
-            <div className={`sidebar-top-ctrl${customizeMode?' sidebar-top-ctrl--active':''}`}>
-              <button className={`nav-icon-btn customize-toggle${customizeMode?' active':''}`}
-                onClick={()=>setCustomizeMode(v=>!v)}
-                title={customizeMode?'カスタマイズ終了':'パネル配置をカスタマイズ'}>
-                {customizeMode?<span className="customize-done-label">完了</span>:<LayoutIcon/>}
-              </button>
-              <div style={{flex:1}}/>
-              <button className="nav-icon-btn" onClick={()=>setSidebarLeft(v=>!v)} title={sidebarLeft?"右に移動":"左に移動"}>
-                {sidebarLeft?<ChevronRightIcon/>:<ChevronLeftIcon/>}
-              </button>
-            </div>
-            {customizeMode&&<div className="customize-mode-banner">⠿ ドラッグしてパネルを並べ替え</div>}
+        <div className={`sidebar-col${sidebarLeft?' sidebar-col--left':''}`}>
             {panelOrder.map((panelId,idx)=>{
               const isDragging=panelDragSrc===idx
               const isDropTarget=panelDropIdx===idx&&panelDragSrc!==null&&panelDragSrc!==idx
               const isLast=idx===panelOrder.length-1
               const panelCls=`panel-section${isDragging?' panel-dragging':''}${isDropTarget?' panel-drop-here':''}`
-              const grabBar=customizeMode&&<div className="panel-grab-full" onMouseDown={e=>onPanelGrab(idx,e)}><GrabIcon/><span>ドラッグして移動</span></div>
+              const grabBar=editToolLayout&&<div className="panel-grab-full" onMouseDown={e=>onPanelGrab(idx,e)}><GrabIcon/><span>ドラッグして移動</span></div>
               if(panelId==='nav')return(
                 <div key="nav" className={`nav-sidebar ${panelCls}`} style={isLast?{flex:1,overflow:'hidden'}:{}}>
                   {grabBar}
@@ -2540,7 +2959,7 @@ export default function App() {
                       <div className="tool-size-row" style={{marginTop:6}}>
                         <span className="tool-label">濃度</span>
                         <input type="range" min="10" max="100" value={gridOpacity} onChange={e=>setGridOpacity(+e.target.value)} className="tool-slider"/>
-                        <span className="tool-size-val">{gridOpacity}%</span>
+                        <input type="number" min="10" max="100" value={gridOpacity} onChange={e=>{const v=Math.max(10,Math.min(100,+e.target.value||10));setGridOpacity(v)}} className="tool-size-input"/>
                       </div>
                     </div>
                   </>}
@@ -2664,7 +3083,6 @@ export default function App() {
               return null
             })}
           </div>
-        )}
       </div>
       {/* custom cursor */}
       {(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER)&&isCursorOnCanvas&&(
@@ -2862,9 +3280,7 @@ function UndoIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="
 function ClearLayerIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="6" x2="12" y2="2"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="7.76" y1="16.24" x2="4.93" y2="19.07"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="7.76" y1="7.76" x2="4.93" y2="4.93"/></svg>}
 function FlipHIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="4" x2="12" y2="20" strokeDasharray="2 2.5"/><path d="M8 8L3 12L8 16"/><path d="M16 8L21 12L16 16"/></svg>}
 function FlipBothIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M7 5L3 12L7 19"/><path d="M17 5L21 12L17 19"/><line x1="12" y1="4" x2="12" y2="20" strokeDasharray="2 2.5"/></svg>}
-function ChevronLeftIcon(){return<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>}
 function LayoutIcon(){return<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>}
-function ChevronRightIcon(){return<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>}
 function GrabIcon(){return<svg width="9" height="13" viewBox="0 0 9 13" fill="currentColor"><circle cx="2.5" cy="2" r="1.2"/><circle cx="6.5" cy="2" r="1.2"/><circle cx="2.5" cy="6.5" r="1.2"/><circle cx="6.5" cy="6.5" r="1.2"/><circle cx="2.5" cy="11" r="1.2"/><circle cx="6.5" cy="11" r="1.2"/></svg>}
 function MergeDownIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="9" width="13" height="13" rx="2"/><rect x="9" y="2" width="13" height="13" rx="2"/><line x1="15" y1="9" x2="9" y2="15"/><polyline points="9,12 9,15 12,15"/></svg>}
 function ResetIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>}
@@ -2879,7 +3295,8 @@ function GridIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="
 function SnapIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3" fill="currentColor" fillOpacity=".3"/><path d="M7 7l2.5 2.5M14.5 14.5L17 17M17 7l-2.5 2.5M9.5 14.5L7 17"/></svg>}
 function ShuffleIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>}
 function DropIcon(){return<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" opacity=".4"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>}
-function HandIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M18 11V8a2 2 0 00-4 0v3"/><path d="M14 10.5V6a2 2 0 00-4 0v4.5"/><path d="M10 10V5a2 2 0 00-4 0v9"/><path d="M6 14v1a6 6 0 006 6h2a6 6 0 006-6v-5a2 2 0 00-4 0v2"/></svg>}
+function HandIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>}
+function RotateCanvasIcon(){return<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>}
 function OverlayIcon(){return<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="13" height="13" rx="1.5"/><rect x="9" y="6" width="13" height="13" rx="1.5" fill="currentColor" fillOpacity=".15"/></svg>}
 function EyeIcon(){return<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}
 function EyeOffIcon(){return<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" opacity=".4"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>}
