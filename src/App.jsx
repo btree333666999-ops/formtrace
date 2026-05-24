@@ -897,7 +897,6 @@ export default function App() {
       let photoW,photoH
       if(pAR>halfW/ah){photoW=halfW;photoH=halfW/pAR}
       else{photoH=ah;photoW=ah*pAR}
-      const oldDispW=dispSizeRef.current.w
       const oldCvW=cvRef.current.w
       const nw=Math.round(photoW)*2,nh=Math.round(photoH)
       setCvW(nw);setCvH(nh);cvRef.current={w:nw,h:nh}
@@ -906,14 +905,7 @@ export default function App() {
         const sx=nw/oldCvW
         setGridSize(v=>v>0?Math.max(1,Math.round(v*sx)):v)
       }
-      // 新しいdispW(100%時)を計算してviewZoomを補正 → ピクセル密度を維持
-      const newAr=nw/nh
-      let ndw=aw,ndh=aw/newAr;if(ndh>ah){ndh=ah;ndw=ah*newAr}
-      const newDispW=Math.floor(ndw)
-      if(oldDispW>0&&oldCvW>0&&newDispW>0){
-        const newVZ=Math.round(Math.min(400,Math.max(20,viewZoomRef.current*oldDispW*nw/(oldCvW*newDispW))))
-        setViewZoom(newVZ);viewZoomRef.current=newVZ
-      }else{setViewZoom(100);viewZoomRef.current=100}
+      setViewZoom(100);viewZoomRef.current=100
       setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}
       Object.entries(layerCanvases.current).forEach(([id,c])=>{
         c.width=nw;c.height=nh
@@ -2460,10 +2452,7 @@ export default function App() {
     const obj=genCompound();practiceObjRef.current=obj;setPracticeObject({...obj});setPracticeMode(true)
     const phi=.18+obj.ep*.52, theta=obj.rot*8+obj.skX*3
     setPracticeOrbit({rx:phi,ry:theta,rz:0,zoom:1})
-    // default canvas size for practice if still at initial default
-    if(cvRef.current.w===DEFAULT_W&&cvRef.current.h===DEFAULT_H){
-      resizePracticeCanvas(1200,600)
-    }
+    resizePracticeCanvas(3600,900)
   }
 
   return (
@@ -2860,13 +2849,8 @@ export default function App() {
                     </button>
                   ))}
                 </div>
-                <div style={{width:1,background:'#444',margin:'0 4px',alignSelf:'stretch'}}/>
-                {[['小',800,400],['中',1200,600],['大',1800,900]].map(([label,w,h])=>(
-                  <button key={label} className={`pst-btn${cvW===w&&cvH===h?' pst-active':''}`}
-                    onClick={()=>resizePracticeCanvas(w*2,h)} title={`${w}×${h}`}>{label}</button>
-                ))}
                 {practiceCategory==='3d'&&<button className="practice-reset" onClick={()=>setPracticeOrbit({rx:.3,ry:.2,rz:0,zoom:1})} title="視点をリセット">⟳</button>}
-                <button className="practice-close" onClick={()=>{setPracticeMode(false);setPracticeDrawMode(false)}} title="練習モードを終了">✕</button>
+                <button className="practice-close" onClick={()=>{setPracticeMode(false);setPracticeDrawMode(false);resizePracticeCanvas(DEFAULT_W,DEFAULT_H)}} title="練習モードを終了">✕</button>
               </div>
             )}
           </div>
@@ -3264,7 +3248,7 @@ function drawFlatPractice(ctx,obj,areaW,areaH,style,x0=0,y0=0){
     g.addColorStop(0,'#f5f1ed');g.addColorStop(.55,'#e6e2dc');g.addColorStop(1,'#cdc9c3')
     ctx.fillStyle=g;ctx.fill()
   }
-  ctx.shadowColor='rgba(50,40,30,.18)';ctx.shadowBlur=isFill?18:0;ctx.shadowOffsetX=sc*.05;ctx.shadowOffsetY=sc*.07
+  ctx.shadowColor='rgba(50,40,30,.18)';ctx.shadowBlur=isFill?18:0;ctx.shadowOffsetX=isFill?sc*.05:0;ctx.shadowOffsetY=isFill?sc*.07:0
   ctx.strokeStyle='#4a4540';ctx.lineWidth=2.2;ctx.stroke()
   ctx.shadowColor='transparent'
   // center dot
@@ -3307,7 +3291,14 @@ function buildThreeObj(type, mat, style){
     case 'sphere':      add(new THREE.SphereGeometry(1.15,48,48)); break
     case 'cube':        add(new THREE.BoxGeometry(1.72,1.72,1.72)); break
     case 'cylinder':    add(new THREE.CylinderGeometry(.78,.78,2.1,48)); break
-    case 'cone':        add(new THREE.ConeGeometry(.98,2.2,48)); break
+    case 'cone': {
+      if(isWire){
+        grp.add(new THREE.Mesh(new THREE.ConeGeometry(.98,2.2,48),mat))
+        const el=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.ConeGeometry(.98,2.2,6),1),edgeMat)
+        grp.add(el)
+      }else add(new THREE.ConeGeometry(.98,2.2,48))
+      break
+    }
     case 'torus':       add(new THREE.TorusGeometry(.82,.30,24,80)); break
     case 'octahedron':  add(new THREE.OctahedronGeometry(1.35,0)); break
     case 'tetrahedron': add(new THREE.TetrahedronGeometry(1.52,0)); break
