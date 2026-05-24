@@ -891,19 +891,24 @@ export default function App() {
     const img=new Image();img.crossOrigin='anonymous';img.src=refImage
     img.onload=()=>{
       refImageEl.current=img
-      // キャンバスサイズを変えずに描画解像度を一定に保つ
-      const {w:nw,h:nh}=cvRef.current
-      const halfW=nw/2
-      const scale=Math.min(halfW/img.naturalWidth,nh/img.naturalHeight)
-      const sw=img.naturalWidth*scale,sh=img.naturalHeight*scale
-      const ox=(halfW-sw)/2,oy=(nh-sh)/2
-      photoRenderRectRef.current={x:ox,y:oy,w:sw,h:sh}
+      // cvWをDEFAULT_Wに固定し、cvHを写真のARに合わせて変える → 写真が左半分をぴったり埋め、描画幅の解像度は一定
+      const pAR=img.naturalWidth/img.naturalHeight
+      const nw=DEFAULT_W,nh=Math.max(1,Math.round(DEFAULT_W/2/pAR))
+      photoRenderRectRef.current={x:0,y:0,w:nw/2,h:nh}
+      setCvW(nw);setCvH(nh);cvRef.current={w:nw,h:nh}
       setViewZoom(100);viewZoomRef.current=100
       setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}
+      Object.entries(layerCanvases.current).forEach(([id,c])=>{
+        c.width=nw;c.height=nh
+        const ctx=c.getContext('2d')
+        if(+id===PAPER_ID){ctx.fillStyle='#fff';ctx.fillRect(0,0,nw,nh)}
+        const blank=ctx.getImageData(0,0,nw,nh)
+        histStacks.current[String(id)]=[blank];histPtrs.current[String(id)]=0
+      })
       if(!photoLayerCanvas.current)photoLayerCanvas.current=document.createElement('canvas')
       const plc=photoLayerCanvas.current;plc.width=nw;plc.height=nh
       const pctx=plc.getContext('2d');pctx.clearRect(0,0,nw,nh)
-      pctx.drawImage(img,ox,oy,sw,sh)
+      pctx.drawImage(img,0,0,nw/2,nh)
       histStacks.current[PHOTO_ID]=[pctx.getImageData(0,0,nw,nh)];histPtrs.current[PHOTO_ID]=0
       lastHistKey.current=null
       setAppliedCrop(null);setCropMode(false);setCropRect(null)
@@ -1042,7 +1047,6 @@ export default function App() {
         drawCompound(ctx,practiceObject,cw/4,_cy,_sc,practiceStyle)
       }
     } else if(photoLayerCanvas.current&&refImageEl.current){
-      ctx.fillStyle='#111';ctx.fillRect(0,0,cw/2,ch)
       ctx.globalAlpha=refOpacity/100
       ctx.drawImage(photoLayerCanvas.current,0,0)
       ctx.globalAlpha=1
@@ -2698,7 +2702,6 @@ export default function App() {
 
       <header className="toolbar">
         <button className="menu-btn" onClick={()=>setShowMenu(v=>!v)} title="メニュー"><MenuIcon/></button>
-        <div className="tb-spacer"/>
         {practiceMode&&<>
           <button className={`pst-btn${practiceCategory==='3d'?' pst-active':''}`}
             onClick={()=>{if(practiceCategory==='3d')return;setPracticeCategory('3d');const o=genCompound();practiceObjRef.current=o;setPracticeObject({...o});const phi=.18+o.ep*.52,theta=o.rot*8+o.skX*3;setPracticeOrbit({rx:phi,ry:theta,rz:0,zoom:1})}}>立体</button>
@@ -2730,6 +2733,7 @@ export default function App() {
           <button className="practice-close" onClick={()=>{setPracticeMode(false);setPracticeDrawMode(false);resizePracticeCanvas(DEFAULT_W,DEFAULT_H)}} title="練習モードを終了">✕</button>
           <div style={{width:1,background:'#555',margin:'0 6px',alignSelf:'stretch'}}/>
         </>}
+        <div className="tb-spacer"/>
         <div className="toolbar-right">
           <div className="toolbar-tools">
             {toolOrder.map((id,idx)=>{
