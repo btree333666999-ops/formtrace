@@ -2850,8 +2850,8 @@ export default function App() {
               <label className="bb-label">不透明度</label>
               <input type="range" min="10" max="100" value={refOpacity} onChange={e=>setRefOpacity(+e.target.value)} className="split-slider"/>
               <div className="step-pair">
-                <button className="size-step-btn" onClick={()=>setRefOpacity(v=>Math.max(10,v-5))}>−</button>
-                <button className="size-step-btn" onClick={()=>setRefOpacity(v=>Math.min(100,v+5))}>+</button>
+                <button className="size-step-btn" onClick={()=>setRefOpacity(v=>Math.max(10,v-1))}>−</button>
+                <button className="size-step-btn" onClick={()=>setRefOpacity(v=>Math.min(100,v+1))}>+</button>
               </div>
               <span className="bb-val">{refOpacity}%</span>
               <span className="bb-sep"/>
@@ -2859,8 +2859,8 @@ export default function App() {
             <label className="bb-label">表示</label>
             <input type="range" min="20" max="400" value={viewZoom} onChange={e=>setViewZoom(+e.target.value)} className="zoom-slider" title="表示サイズ"/>
             <div className="step-pair">
-              <button className="size-step-btn" onClick={()=>setViewZoom(v=>Math.max(20,v-5))}>−</button>
-              <button className="size-step-btn" onClick={()=>setViewZoom(v=>Math.min(400,v+5))}>+</button>
+              <button className="size-step-btn" onClick={()=>setViewZoom(v=>Math.max(20,v-1))}>−</button>
+              <button className="size-step-btn" onClick={()=>setViewZoom(v=>Math.min(400,v+1))}>+</button>
             </div>
             <span className="bb-val">{viewZoom}%</span>
             {(viewZoom!==100||panOffset.x!==0||panOffset.y!==0)&&<button className="bb-reset-btn" onClick={()=>{setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}} title="表示位置・拡大率をリセット">⟳</button>}
@@ -2879,8 +2879,8 @@ export default function App() {
                 onChange={e=>practiceMode?setPracticeOverlayOpacity(+e.target.value):setRefOverlayOpacity(+e.target.value)}
                 className="split-slider" style={{width:72}}/>
               <div className="step-pair">
-                <button className="size-step-btn" onClick={()=>practiceMode?setPracticeOverlayOpacity(v=>Math.max(0,v-5)):setRefOverlayOpacity(v=>Math.max(0,v-5))}>−</button>
-                <button className="size-step-btn" onClick={()=>practiceMode?setPracticeOverlayOpacity(v=>Math.min(100,v+5)):setRefOverlayOpacity(v=>Math.min(100,v+5))}>+</button>
+                <button className="size-step-btn" onClick={()=>practiceMode?setPracticeOverlayOpacity(v=>Math.max(0,v-1)):setRefOverlayOpacity(v=>Math.max(0,v-1))}>−</button>
+                <button className="size-step-btn" onClick={()=>practiceMode?setPracticeOverlayOpacity(v=>Math.min(100,v+1)):setRefOverlayOpacity(v=>Math.min(100,v+1))}>+</button>
               </div>
               <span style={{color:'#aaa',fontSize:11,flexShrink:0,minWidth:26}}>
                 {practiceMode?practiceOverlayOpacity:refOverlayOpacity}%
@@ -2974,9 +2974,9 @@ export default function App() {
                         <div className="tool-size-row">
                           <span className="tool-label">px</span>
                           <input type="range" min="20" max="500" value={gridSize} onChange={e=>setGridSize(+e.target.value)} className="tool-slider"/>
-                          <button className="size-step-btn" onClick={()=>setGridSize(v=>Math.max(1,v-5))}>−</button>
+                          <button className="size-step-btn" onClick={()=>setGridSize(v=>Math.max(1,v-1))}>−</button>
                           <input type="number" min="1" max="2000" value={gridSize} onChange={e=>{const v=Math.max(1,+e.target.value||1);setGridSize(v)}} className="tool-size-input"/>
-                          <button className="size-step-btn" onClick={()=>setGridSize(v=>Math.min(2000,v+5))}>+</button>
+                          <button className="size-step-btn" onClick={()=>setGridSize(v=>Math.min(2000,v+1))}>+</button>
                         </div>
                       ):(
                         <div className="tool-size-row">
@@ -2990,9 +2990,9 @@ export default function App() {
                       <div className="tool-size-row" style={{marginTop:6}}>
                         <span className="tool-label">濃度</span>
                         <input type="range" min="10" max="100" value={gridOpacity} onChange={e=>setGridOpacity(+e.target.value)} className="tool-slider"/>
-                        <button className="size-step-btn" onClick={()=>setGridOpacity(v=>Math.max(10,v-5))}>−</button>
+                        <button className="size-step-btn" onClick={()=>setGridOpacity(v=>Math.max(10,v-1))}>−</button>
                         <input type="number" min="10" max="100" value={gridOpacity} onChange={e=>{const v=Math.max(10,Math.min(100,+e.target.value||10));setGridOpacity(v)}} className="tool-size-input"/>
-                        <button className="size-step-btn" onClick={()=>setGridOpacity(v=>Math.min(100,v+5))}>+</button>
+                        <button className="size-step-btn" onClick={()=>setGridOpacity(v=>Math.min(100,v+1))}>+</button>
                       </div>
                     </div>
                   </>}
@@ -3080,9 +3080,9 @@ export default function App() {
                       <label>不透明度<span>{refOpacity}%</span></label>
                       <div className="tool-size-row">
                         <input type="range" min="0" max="100" value={refOpacity} onChange={e=>setRefOpacity(+e.target.value)} style={{flex:1,width:'auto'}}/>
-                        <button className="size-step-btn" onClick={()=>setRefOpacity(v=>Math.max(0,v-5))}>−</button>
+                        <button className="size-step-btn" onClick={()=>setRefOpacity(v=>Math.max(0,v-1))}>−</button>
                         <input type="number" min="0" max="100" value={refOpacity} onChange={e=>setRefOpacity(Math.max(0,Math.min(100,+e.target.value||0)))} className="tool-size-input"/>
-                        <button className="size-step-btn" onClick={()=>setRefOpacity(v=>Math.min(100,v+5))}>+</button>
+                        <button className="size-step-btn" onClick={()=>setRefOpacity(v=>Math.min(100,v+1))}>+</button>
                       </div>
                     </div>
                   )}
@@ -3091,9 +3091,9 @@ export default function App() {
                       <label>不透明度<span>{activeLayer.opacity}%</span></label>
                       <div className="tool-size-row">
                         <input type="range" min="0" max="100" value={activeLayer.opacity} onChange={e=>updLayer(activeLayerId,{opacity:+e.target.value})} style={{flex:1,width:'auto'}}/>
-                        <button className="size-step-btn" onClick={()=>updLayer(activeLayerId,{opacity:Math.max(0,activeLayer.opacity-5)})}>−</button>
+                        <button className="size-step-btn" onClick={()=>updLayer(activeLayerId,{opacity:Math.max(0,activeLayer.opacity-1)})}>−</button>
                         <input type="number" min="0" max="100" value={activeLayer.opacity} onChange={e=>updLayer(activeLayerId,{opacity:Math.max(0,Math.min(100,+e.target.value||0))})} className="tool-size-input"/>
-                        <button className="size-step-btn" onClick={()=>updLayer(activeLayerId,{opacity:Math.min(100,activeLayer.opacity+5)})}>+</button>
+                        <button className="size-step-btn" onClick={()=>updLayer(activeLayerId,{opacity:Math.min(100,activeLayer.opacity+1)})}>+</button>
                       </div>
                     </div>
                   )}
