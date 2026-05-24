@@ -897,8 +897,17 @@ export default function App() {
       let photoW,photoH
       if(pAR>halfW/ah){photoW=halfW;photoH=halfW/pAR}
       else{photoH=ah;photoW=ah*pAR}
+      const oldW=cvRef.current.w
       const nw=Math.round(photoW)*2,nh=Math.round(photoH)
       setCvW(nw);setCvH(nh);cvRef.current={w:nw,h:nh}
+      // gridSizeをキャンバス幅の変化に合わせてスケール（分割モードは変えない）
+      if(oldW>0&&nw!==oldW){
+        const sx=nw/oldW
+        setGridSize(v=>v>0?Math.max(1,Math.round(v*sx)):v)
+      }
+      // ズームをリセット（キャンバスサイズが変わるため密度が変わらないよう）
+      setViewZoom(100);viewZoomRef.current=100
+      setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}
       Object.entries(layerCanvases.current).forEach(([id,c])=>{
         c.width=nw;c.height=nh
         const ctx=c.getContext('2d')
@@ -2164,8 +2173,16 @@ export default function App() {
     if(photoLayerCanvas.current){photoLayerCanvas.current.width=1;photoLayerCanvas.current=null}
     delete histStacks.current[PHOTO_ID];delete histPtrs.current[PHOTO_ID]
     if(activeLayerId===PHOTO_ID)setActiveLayerId(1)
+    const oldW=cvRef.current.w
     const nw=DEFAULT_W,nh=DEFAULT_H
     setCvW(nw);setCvH(nh);cvRef.current={w:nw,h:nh}
+    // gridSizeをキャンバス幅に合わせてスケール
+    if(oldW>0&&nw!==oldW){
+      const sx=nw/oldW
+      setGridSize(v=>v>0?Math.max(1,Math.round(v*sx)):v)
+    }
+    setViewZoom(100);viewZoomRef.current=100
+    setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}
     Object.entries(layerCanvases.current).forEach(([id,c])=>{
       c.width=nw;c.height=nh
       const ctx=c.getContext('2d');ctx.clearRect(0,0,nw,nh)
@@ -2815,6 +2832,10 @@ export default function App() {
                   onClick={()=>{if(practiceCategory==='3d')return;setPracticeCategory('3d');const o=genCompound();practiceObjRef.current=o;setPracticeObject({...o});const phi=.18+o.ep*.52,theta=o.rot*8+o.skX*3;setPracticeOrbit({rx:phi,ry:theta,rz:0,zoom:1})}}>立体</button>
                 <button className={`pst-btn${practiceCategory==='flat'?' pst-active':''}`}
                   onClick={()=>{if(practiceCategory==='flat')return;setPracticeCategory('flat');const o=genFlat();practiceObjRef.current=o;setPracticeObject({...o});setPracticeDrawMode(true)}}>平面</button>
+                <button className="practice-shuffle" title="別のお題に切り替え" onClick={()=>{
+                  if(practiceCategory==='3d'){const o=genCompound();practiceObjRef.current=o;setPracticeObject({...o});const phi=.18+o.ep*.52,theta=o.rot*8+o.skX*3;setPracticeOrbit({rx:phi,ry:theta,rz:0,zoom:1})}
+                  else{const o=genFlat();practiceObjRef.current=o;setPracticeObject({...o})}
+                }}><ShuffleIcon/></button>
                 <div style={{width:1,background:'#444',margin:'0 4px',alignSelf:'stretch'}}/>
                 {/* 立体モード専用: 回転/描画 */}
                 {practiceCategory==='3d'&&<>
