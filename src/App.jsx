@@ -768,6 +768,7 @@ export default function App() {
   const cvRef          = useRef({w:DEFAULT_W,h:DEFAULT_H})
   const layerCanvases  = useRef({})
   const photoLayerCanvas = useRef(null)
+  const photoRenderRectRef = useRef({x:0,y:0,w:1,h:1})
   const displayRef     = useRef(null)
   const compRef        = useRef(null)
   const panOffsetRef   = useRef({x:0,y:0})
@@ -890,35 +891,19 @@ export default function App() {
     const img=new Image();img.crossOrigin='anonymous';img.src=refImage
     img.onload=()=>{
       refImageEl.current=img
-      const el=drawAreaRef.current;if(!el)return
-      const aw=el.offsetWidth,ah=el.offsetHeight;if(!aw||!ah)return
-      const pAR=img.naturalWidth/img.naturalHeight
-      const halfW=aw/2
-      let photoW,photoH
-      if(pAR>halfW/ah){photoW=halfW;photoH=halfW/pAR}
-      else{photoH=ah;photoW=ah*pAR}
-      const oldCvW=cvRef.current.w
-      const nw=Math.round(photoW)*2,nh=Math.round(photoH)
-      setCvW(nw);setCvH(nh);cvRef.current={w:nw,h:nh}
-      // gridSizeをキャンバス幅の変化に合わせてスケール（分割モードは変えない）
-      if(oldCvW>0&&nw!==oldCvW){
-        const sx=nw/oldCvW
-        setGridSize(v=>v>0?Math.max(1,Math.round(v*sx)):v)
-      }
+      // キャンバスサイズを変えずに描画解像度を一定に保つ
+      const {w:nw,h:nh}=cvRef.current
+      const halfW=nw/2
+      const scale=Math.min(halfW/img.naturalWidth,nh/img.naturalHeight)
+      const sw=img.naturalWidth*scale,sh=img.naturalHeight*scale
+      const ox=(halfW-sw)/2,oy=(nh-sh)/2
+      photoRenderRectRef.current={x:ox,y:oy,w:sw,h:sh}
       setViewZoom(100);viewZoomRef.current=100
       setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}
-      Object.entries(layerCanvases.current).forEach(([id,c])=>{
-        c.width=nw;c.height=nh
-        const ctx=c.getContext('2d')
-        if(+id===PAPER_ID){ctx.fillStyle='#fff';ctx.fillRect(0,0,nw,nh)}
-        const blank=ctx.getImageData(0,0,nw,nh)
-        histStacks.current[String(id)]=[blank];histPtrs.current[String(id)]=0
-      })
-      // bake photo into photoLayerCanvas (left half)
       if(!photoLayerCanvas.current)photoLayerCanvas.current=document.createElement('canvas')
       const plc=photoLayerCanvas.current;plc.width=nw;plc.height=nh
       const pctx=plc.getContext('2d');pctx.clearRect(0,0,nw,nh)
-      pctx.drawImage(img,0,0,nw/2,nh)
+      pctx.drawImage(img,ox,oy,sw,sh)
       histStacks.current[PHOTO_ID]=[pctx.getImageData(0,0,nw,nh)];histPtrs.current[PHOTO_ID]=0
       lastHistKey.current=null
       setAppliedCrop(null);setCropMode(false);setCropRect(null)
@@ -2169,6 +2154,7 @@ export default function App() {
   const deletePhoto=()=>{
     setRefImage(null);refImageEl.current=null
     setAppliedCrop(null);setCropMode(false);setCropRect(null)
+    photoRenderRectRef.current={x:0,y:0,w:1,h:1}
     if(photoLayerCanvas.current){photoLayerCanvas.current.width=1;photoLayerCanvas.current=null}
     delete histStacks.current[PHOTO_ID];delete histPtrs.current[PHOTO_ID]
     if(activeLayerId===PHOTO_ID)setActiveLayerId(1)
@@ -2343,54 +2329,38 @@ export default function App() {
   const applyCrop=()=>{
     if(!cropRect||!refImageEl.current)return
     const img=refImageEl.current
-    const {w:oldW,h:oldH}=cvRef.current
+    const {w:cw,h:ch}=cvRef.current
     const {x1,y1,x2,y2}=cropRect
     const cropW=x2-x1,cropH=y2-y1
     if(cropW<10||cropH<10)return
-    const newW=cropW*2,newH=cropH
-    // source region in image natural coords (photo fills left half: 0,0 → oldW/2,oldH)
-    const sx=x1*img.naturalWidth/(oldW/2)
-    const sy=y1*img.naturalHeight/oldH
-    const sw=cropW*img.naturalWidth/(oldW/2)
-    const sh=cropH*img.naturalHeight/oldH
-    setCvW(newW);setCvH(newH);cvRef.current={w:newW,h:newH}
-    Object.entries(layerCanvases.current).forEach(([id,c])=>{
-      // 切り取り前に右半分の同領域を保存して描画を保持
-      const savedData=c.getContext('2d').getImageData(x1+oldW/2,y1,cropW,cropH)
-      c.width=newW;c.height=newH
-      const ctx=c.getContext('2d')
-      if(+id===PAPER_ID){ctx.fillStyle='#fff';ctx.fillRect(0,0,newW,newH)}
-      // 保存した描画を新しい右半分に配置
-      ctx.putImageData(savedData,newW/2,0)
-      const blank=ctx.getImageData(0,0,newW,newH)
-      histStacks.current[String(id)]=[blank];histPtrs.current[String(id)]=0
-    })
+    // crop rect (canvas coords) → image natural coords via photoRenderRect
+    const {x:prx,y:pry,w:prw,h:prh}=photoRenderRectRef.current
+    const sx=(x1-prx)*img.naturalWidth/prw
+    const sy=(y1-pry)*img.naturalHeight/prh
+    const snw=cropW*img.naturalWidth/prw
+    const snh=cropH*img.naturalHeight/prh
+    const origRR={...photoRenderRectRef.current}
     if(!photoLayerCanvas.current)photoLayerCanvas.current=document.createElement('canvas')
-    const plc=photoLayerCanvas.current;plc.width=newW;plc.height=newH
-    const pctx=plc.getContext('2d');pctx.clearRect(0,0,newW,newH)
-    pctx.drawImage(img,sx,sy,sw,sh,0,0,newW/2,newH)
-    histStacks.current[PHOTO_ID]=[pctx.getImageData(0,0,newW,newH)];histPtrs.current[PHOTO_ID]=0
-    setAppliedCrop({origW:oldW,origH:oldH})
+    const plc=photoLayerCanvas.current;plc.width=cw;plc.height=ch
+    const pctx=plc.getContext('2d');pctx.clearRect(0,0,cw,ch)
+    pctx.drawImage(img,sx,sy,snw,snh,0,0,cw/2,ch)
+    photoRenderRectRef.current={x:0,y:0,w:cw/2,h:ch}
+    histStacks.current[PHOTO_ID]=[pctx.getImageData(0,0,cw,ch)];histPtrs.current[PHOTO_ID]=0
+    setAppliedCrop({origRR})
     setCropMode(false);setCropRect(null)
     setRev(r=>r+1)
   }
   const resetCrop=()=>{
     if(!appliedCrop||!refImageEl.current)return
     const img=refImageEl.current
-    const {origW,origH}=appliedCrop
-    setCvW(origW);setCvH(origH);cvRef.current={w:origW,h:origH}
-    Object.entries(layerCanvases.current).forEach(([id,c])=>{
-      c.width=origW;c.height=origH
-      const ctx=c.getContext('2d')
-      if(+id===PAPER_ID){ctx.fillStyle='#fff';ctx.fillRect(0,0,origW,origH)}
-      const blank=ctx.getImageData(0,0,origW,origH)
-      histStacks.current[String(id)]=[blank];histPtrs.current[String(id)]=0
-    })
+    const {w:cw,h:ch}=cvRef.current
+    const {origRR}=appliedCrop
     if(!photoLayerCanvas.current)photoLayerCanvas.current=document.createElement('canvas')
-    const plc=photoLayerCanvas.current;plc.width=origW;plc.height=origH
-    const pctx=plc.getContext('2d');pctx.clearRect(0,0,origW,origH)
-    pctx.drawImage(img,0,0,origW/2,origH)
-    histStacks.current[PHOTO_ID]=[pctx.getImageData(0,0,origW,origH)];histPtrs.current[PHOTO_ID]=0
+    const plc=photoLayerCanvas.current;plc.width=cw;plc.height=ch
+    const pctx=plc.getContext('2d');pctx.clearRect(0,0,cw,ch)
+    pctx.drawImage(img,origRR.x,origRR.y,origRR.w,origRR.h)
+    photoRenderRectRef.current={...origRR}
+    histStacks.current[PHOTO_ID]=[pctx.getImageData(0,0,cw,ch)];histPtrs.current[PHOTO_ID]=0
     setAppliedCrop(null)
     setRev(r=>r+1)
   }
