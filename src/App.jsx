@@ -891,9 +891,15 @@ export default function App() {
     const img=new Image();img.crossOrigin='anonymous';img.src=refImage
     img.onload=()=>{
       refImageEl.current=img
-      // cvWをDEFAULT_Wに固定し、cvHを写真のARに合わせて変える → 写真が左半分をぴったり埋め、描画幅の解像度は一定
+      // 写真のARに合わせてキャンバスサイズを決定、ただし総ピクセル数をDEFAULT_W*DEFAULT_H以下に制限
       const pAR=img.naturalWidth/img.naturalHeight
-      const nw=DEFAULT_W,nh=Math.max(1,Math.round(DEFAULT_W/2/pAR))
+      let nw=DEFAULT_W,nh=Math.max(1,Math.round(DEFAULT_W/2/pAR))
+      const maxArea=DEFAULT_W*DEFAULT_H
+      if(nw*nh>maxArea){
+        const sc=Math.sqrt(maxArea/(nw*nh))
+        nw=Math.floor(Math.round(nw*sc)/2)*2  // 偶数に丸める
+        nh=Math.max(1,Math.round(nh*sc))
+      }
       photoRenderRectRef.current={x:0,y:0,w:nw/2,h:nh}
       setCvW(nw);setCvH(nh);cvRef.current={w:nw,h:nh}
       setViewZoom(100);viewZoomRef.current=100
