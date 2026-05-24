@@ -2830,9 +2830,11 @@ export default function App() {
                   </div>
                 )}
                 {!practiceMode&&!refImage&&(
-                  <div className="drop-zone"
+                  <div className={`drop-zone${photoAreaDragOver?' drag-over':''}`}
                     style={{position:'absolute',top:0,left:0,width:'50%',height:'100%'}}
-                    onDragOver={e=>e.preventDefault()} onDrop={onRefDrop}>
+                    onDragOver={e=>{e.preventDefault();setPhotoAreaDragOver(true)}}
+                    onDragLeave={()=>setPhotoAreaDragOver(false)}
+                    onDrop={e=>{setPhotoAreaDragOver(false);onRefDrop(e)}}>
                     <DropIcon/>
                     <p>参考画像をドロップ / Ctrl+V で貼り付け</p>
                     <p className="drop-sub">PNG · JPG · GIF · WebP · スクリーンショット可</p>

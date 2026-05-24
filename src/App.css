@@ -173,7 +173,10 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
   flex: 1; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 8px;
   border: 2px dashed var(--border); color: var(--text-dim); user-select: none;
-  background: #1a1a1a;
+  background: #1a1a1a; transition: border-color .15s, background .15s;
+}
+.drop-zone.drag-over {
+  border-color: #4a9eff; background: rgba(74,158,255,0.08); color: #4a9eff;
 }
 .drop-zone p { font-size: 14px; }
 .drop-sub { font-size: 11px; opacity: 0.6; }
