@@ -885,16 +885,20 @@ export default function App() {
     Object.keys(layerCanvases.current).forEach(id=>{if(!layers.find(l=>l.id===+id))delete layerCanvases.current[id]})
   },[layers])
 
-  // Photo load → resize canvas to 2×photoDisplayWidth × photoDisplayHeight
+  // Photo load — canvas stays DEFAULT_W×DEFAULT_H; photo is contain-fit into left half
   useEffect(()=>{
     if(!refImage){refImageEl.current=null;return}
     const img=new Image();img.crossOrigin='anonymous';img.src=refImage
     img.onload=()=>{
       refImageEl.current=img
-      // cvWをDEFAULT_Wに固定し、cvHを写真のARに合わせて変える → 写真が左半分をぴったり埋め、描画幅の解像度は一定
+      const nw=DEFAULT_W,nh=DEFAULT_H
+      // contain-fit photo into left half (nw/2 × nh)
       const pAR=img.naturalWidth/img.naturalHeight
-      const nw=DEFAULT_W,nh=Math.max(1,Math.round(DEFAULT_W/2/pAR))
-      photoRenderRectRef.current={x:0,y:0,w:nw/2,h:nh}
+      const lw=nw/2,lh=nh
+      let pw,ph
+      if(pAR>lw/lh){pw=lw;ph=Math.round(lw/pAR)}else{ph=lh;pw=Math.round(lh*pAR)}
+      const px=Math.round((lw-pw)/2),py=Math.round((lh-ph)/2)
+      photoRenderRectRef.current={x:px,y:py,w:pw,h:ph}
       setCvW(nw);setCvH(nh);cvRef.current={w:nw,h:nh}
       setViewZoom(100);viewZoomRef.current=100
       setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}
@@ -908,7 +912,7 @@ export default function App() {
       if(!photoLayerCanvas.current)photoLayerCanvas.current=document.createElement('canvas')
       const plc=photoLayerCanvas.current;plc.width=nw;plc.height=nh
       const pctx=plc.getContext('2d');pctx.clearRect(0,0,nw,nh)
-      pctx.drawImage(img,0,0,nw/2,nh)
+      pctx.drawImage(img,px,py,pw,ph)
       histStacks.current[PHOTO_ID]=[pctx.getImageData(0,0,nw,nh)];histPtrs.current[PHOTO_ID]=0
       lastHistKey.current=null
       setAppliedCrop(null);setCropMode(false);setCropRect(null)
