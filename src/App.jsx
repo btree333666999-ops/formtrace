@@ -1171,6 +1171,13 @@ export default function App() {
       navUpdate()
     }
   },[cvW,cvH,navUpdate,dispSize])
+  // Scroll flashed tabmate row into view if it's outside the visible panel area
+  useEffect(()=>{
+    if(!tabmateFlash)return
+    const el=document.querySelector(`.tabmate-map-list [data-action="${tabmateFlash}"]`)
+    el?.scrollIntoView({behavior:'smooth',block:'nearest'})
+  },[tabmateFlash])
+
   useEffect(()=>{comp()},[comp,showGrid,gridVisible,gridSize,gridOpacity])
   useEffect(()=>{comp()},[comp,refOpacity])
   useEffect(()=>{comp()},[comp,layers])
@@ -2515,7 +2522,7 @@ export default function App() {
                         }
                         const modeLabel=modeType==='default'?'デフォルト':modeType==='temporary'?'一時切替':modeType==='hold'?'ホールド':'ローテーション'
                         return(
-                          <div key={a} className={`tabmate-row sc-row-wrap${tabmateFlash===a?' tabmate-flash':''}`}>
+                          <div key={a} data-action={a} className={`tabmate-row sc-row-wrap${tabmateFlash===a?' tabmate-flash':''}`}>
                             <span className="tabmate-action">{l}</span>
                             <button className={`tabmate-learn-btn${learning?' learning':mapped?' configured':''}`}
                               onClick={()=>{const next=learning?null:a;setTabmateLearning(next);tabmateLearningRef.current=next}}>
