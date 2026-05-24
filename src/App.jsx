@@ -1042,6 +1042,7 @@ export default function App() {
         drawCompound(ctx,practiceObject,cw/4,_cy,_sc,practiceStyle)
       }
     } else if(photoLayerCanvas.current&&refImageEl.current){
+      ctx.fillStyle='#111';ctx.fillRect(0,0,cw/2,ch)
       ctx.globalAlpha=refOpacity/100
       ctx.drawImage(photoLayerCanvas.current,0,0)
       ctx.globalAlpha=1
@@ -2675,6 +2676,37 @@ export default function App() {
       <header className="toolbar">
         <button className="menu-btn" onClick={()=>setShowMenu(v=>!v)} title="メニュー"><MenuIcon/></button>
         <div className="tb-spacer"/>
+        {practiceMode&&<>
+          <button className={`pst-btn${practiceCategory==='3d'?' pst-active':''}`}
+            onClick={()=>{if(practiceCategory==='3d')return;setPracticeCategory('3d');const o=genCompound();practiceObjRef.current=o;setPracticeObject({...o});const phi=.18+o.ep*.52,theta=o.rot*8+o.skX*3;setPracticeOrbit({rx:phi,ry:theta,rz:0,zoom:1})}}>立体</button>
+          <button className={`pst-btn${practiceCategory==='flat'?' pst-active':''}`}
+            onClick={()=>{if(practiceCategory==='flat')return;setPracticeCategory('flat');const o=genFlat();practiceObjRef.current=o;setPracticeObject({...o});setPracticeDrawMode(true)}}>平面</button>
+          <button className="practice-shuffle" title="別のお題に切り替え" onClick={()=>{
+            if(practiceCategory==='3d'){const o=genCompound();practiceObjRef.current=o;setPracticeObject({...o});const phi=.18+o.ep*.52,theta=o.rot*8+o.skX*3;setPracticeOrbit({rx:phi,ry:theta,rz:0,zoom:1})}
+            else{const o=genFlat();practiceObjRef.current=o;setPracticeObject({...o})}
+          }}><ShuffleIcon/></button>
+          <div style={{width:1,background:'#555',margin:'0 6px',alignSelf:'stretch'}}/>
+          {practiceCategory==='3d'&&<>
+            <button className={`pst-btn${!practiceDrawMode?' pst-active':''}`}
+              onClick={()=>setPracticeDrawMode(false)} title="回転・ズーム">↻ 回転</button>
+            <button className={`pst-btn${practiceDrawMode?' pst-active':''}`}
+              onClick={()=>setPracticeDrawMode(true)} title="上に描画">✎ 描画</button>
+            <div style={{width:1,background:'#555',margin:'0 6px',alignSelf:'stretch'}}/>
+          </>}
+          <div className="practice-styles">
+            {(practiceCategory==='3d'?PSTYLES:FLAT_STYLES).map(s=>(
+              <button key={s}
+                className={`pst-btn${(practiceCategory==='3d'?practiceStyle:flatStyle)===s?' pst-active':''}`}
+                onClick={()=>practiceCategory==='3d'?setPracticeStyle(s):setFlatStyle(s)}>
+                {practiceCategory==='3d'?PLABELS[s]:FLAT_STYLE_LABELS[s]}
+              </button>
+            ))}
+          </div>
+          {practiceCategory==='3d'&&<button className="practice-reset" onClick={()=>setPracticeOrbit({rx:.3,ry:.2,rz:0,zoom:1})} title="視点をリセット">⟳</button>}
+          <div style={{width:1,background:'#555',margin:'0 6px',alignSelf:'stretch'}}/>
+          <button className="practice-close" onClick={()=>{setPracticeMode(false);setPracticeDrawMode(false);resizePracticeCanvas(DEFAULT_W,DEFAULT_H)}} title="練習モードを終了">✕</button>
+          <div style={{width:1,background:'#555',margin:'0 6px',alignSelf:'stretch'}}/>
+        </>}
         <div className="toolbar-right">
           <div className="toolbar-tools">
             {toolOrder.map((id,idx)=>{
@@ -2785,44 +2817,6 @@ export default function App() {
                 )}
               </div>
             </div>
-            {practiceMode&&dispSize.w>0&&(
-              <div className="practice-bar" style={{
-                left:`calc(50% - ${dispSize.w/2}px)`,
-                right:'auto',
-                width:dispSize.w/2
-              }}>
-                {/* カテゴリ切替 */}
-                <button className={`pst-btn${practiceCategory==='3d'?' pst-active':''}`}
-                  onClick={()=>{if(practiceCategory==='3d')return;setPracticeCategory('3d');const o=genCompound();practiceObjRef.current=o;setPracticeObject({...o});const phi=.18+o.ep*.52,theta=o.rot*8+o.skX*3;setPracticeOrbit({rx:phi,ry:theta,rz:0,zoom:1})}}>立体</button>
-                <button className={`pst-btn${practiceCategory==='flat'?' pst-active':''}`}
-                  onClick={()=>{if(practiceCategory==='flat')return;setPracticeCategory('flat');const o=genFlat();practiceObjRef.current=o;setPracticeObject({...o});setPracticeDrawMode(true)}}>平面</button>
-                <button className="practice-shuffle" title="別のお題に切り替え" onClick={()=>{
-                  if(practiceCategory==='3d'){const o=genCompound();practiceObjRef.current=o;setPracticeObject({...o});const phi=.18+o.ep*.52,theta=o.rot*8+o.skX*3;setPracticeOrbit({rx:phi,ry:theta,rz:0,zoom:1})}
-                  else{const o=genFlat();practiceObjRef.current=o;setPracticeObject({...o})}
-                }}><ShuffleIcon/></button>
-                <div style={{width:1,background:'#444',margin:'0 4px',alignSelf:'stretch'}}/>
-                {/* 立体モード専用: 回転/描画 */}
-                {practiceCategory==='3d'&&<>
-                  <button className={`pst-btn${!practiceDrawMode?' pst-active':''}`}
-                    onClick={()=>setPracticeDrawMode(false)} title="回転・ズーム">↻ 回転</button>
-                  <button className={`pst-btn${practiceDrawMode?' pst-active':''}`}
-                    onClick={()=>setPracticeDrawMode(true)} title="上に描画">✎ 描画</button>
-                  <div style={{width:1,background:'#444',margin:'0 4px',alignSelf:'stretch'}}/>
-                </>}
-                {/* スタイル選択 */}
-                <div className="practice-styles">
-                  {(practiceCategory==='3d'?PSTYLES:FLAT_STYLES).map(s=>(
-                    <button key={s}
-                      className={`pst-btn${(practiceCategory==='3d'?practiceStyle:flatStyle)===s?' pst-active':''}`}
-                      onClick={()=>practiceCategory==='3d'?setPracticeStyle(s):setFlatStyle(s)}>
-                      {practiceCategory==='3d'?PLABELS[s]:FLAT_STYLE_LABELS[s]}
-                    </button>
-                  ))}
-                </div>
-                {practiceCategory==='3d'&&<button className="practice-reset" onClick={()=>setPracticeOrbit({rx:.3,ry:.2,rz:0,zoom:1})} title="視点をリセット">⟳</button>}
-                <button className="practice-close" onClick={()=>{setPracticeMode(false);setPracticeDrawMode(false);resizePracticeCanvas(DEFAULT_W,DEFAULT_H)}} title="練習モードを終了">✕</button>
-              </div>
-            )}
           </div>
 
           <div className="bottom-bar">
