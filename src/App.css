@@ -568,6 +568,16 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
 .tabmate-learn-btn:hover { background: var(--btn-hover); color: var(--text); }
 .tabmate-learn-btn.configured { background: #0e2018; color: #5acc7a; border-color: #2a6040; }
 .tabmate-learn-btn.configured:hover { background: #142a1e; color: #7adc96; border-color: #3a8050; }
+
+/* Flash highlight when tabmate button is pressed */
+@keyframes tabmate-flash-anim {
+  0%   { background-color: rgba(90,180,255,0.28); box-shadow: inset 0 0 0 1px rgba(90,180,255,0.5); }
+  100% { background-color: transparent;           box-shadow: none; }
+}
+.tabmate-row.tabmate-flash {
+  animation: tabmate-flash-anim 0.6s ease-out forwards;
+}
+
 .tabmate-learn-btn.learning {
   background: rgba(74,144,226,.2); color: var(--accent);
   border-color: var(--accent); animation: tabmate-pulse 1s ease-in-out infinite;

@@ -811,6 +811,7 @@ export default function App() {
   const [showTabmatePanel,setShowTabmatePanel] = useState(false)
   const [tabmateConnected,setTabmateConnected] = useState(false)
   const [tabmateLearning,setTabmateLearning]   = useState(null)
+  const [tabmateFlash,setTabmateFlash]         = useState(null)  // action name that is flashing
   const [tabmateMappings,setTabmateMappings]   = useState(()=>{
     try{return JSON.parse(localStorage.getItem('tabmate-mappings')||'{}')}catch{return {}}
   })
@@ -820,6 +821,7 @@ export default function App() {
   const tabmateActionsRef   = useRef({})
   const tabmateMappingsRef  = useRef({})
   const tabmateSpringRef    = useRef(null)   // {btnKey, from} when a Tabmate button is held in hold mode
+  const tabmateFlashTimer   = useRef(null)   // timeout id for clearing tabmateFlash
   const shortcutsRef        = useRef(shortcuts)
   const shortcutModesRef    = useRef({})
   const scLearningRef       = useRef(null)
@@ -2010,10 +2012,16 @@ export default function App() {
     }
     // ── Presses → execute action ──────────────────────────────────
     const TOOL_CONSTS={pen:TOOLS.PEN,eraser:TOOLS.ERASER,select:TOOLS.SELECT,move:TOOLS.MOVE,line:TOOLS.LINE,ruler:TOOLS.RULER,hand:TOOLS.HAND,rotateCanvas:TOOLS.ROTATE}
+    const flash=a=>{
+      setTabmateFlash(a)
+      clearTimeout(tabmateFlashTimer.current)
+      tabmateFlashTimer.current=setTimeout(()=>setTabmateFlash(null),600)
+    }
     for(const {i,v} of presses){
       const btnKey = `${rid}:${i}:${v}`
       const action = tabmateMappingsRef.current[btnKey]; if(!action) continue
       const mt = getModeType(shortcutModesRef.current, action)
+      flash(action)
       if(mt==='hold'){
         if(!tabmateSpringRef.current){
           tabmateSpringRef.current = {btnKey, from: S.current.activeTool}
@@ -2507,7 +2515,7 @@ export default function App() {
                         }
                         const modeLabel=modeType==='default'?'デフォルト':modeType==='temporary'?'一時切替':modeType==='hold'?'ホールド':'ローテーション'
                         return(
-                          <div key={a} className="tabmate-row sc-row-wrap">
+                          <div key={a} className={`tabmate-row sc-row-wrap${tabmateFlash===a?' tabmate-flash':''}`}>
                             <span className="tabmate-action">{l}</span>
                             <button className={`tabmate-learn-btn${learning?' learning':mapped?' configured':''}`}
                               onClick={()=>{const next=learning?null:a;setTabmateLearning(next);tabmateLearningRef.current=next}}>
