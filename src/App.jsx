@@ -2849,20 +2849,20 @@ export default function App() {
             {refImage&&!practiceMode&&<>
               <label className="bb-label">不透明度</label>
               <input type="range" min="10" max="100" value={refOpacity} onChange={e=>setRefOpacity(+e.target.value)} className="split-slider"/>
-              <div className="step-pair">
-                <button className="size-step-btn" onClick={()=>setRefOpacity(v=>Math.max(10,v-1))}>−</button>
-                <button className="size-step-btn" onClick={()=>setRefOpacity(v=>Math.min(100,v+1))}>+</button>
-              </div>
               <span className="bb-val">{refOpacity}%</span>
+              <div className="num-spin-arrows" style={{height:20}}>
+                <button className="num-spin-up" onClick={()=>setRefOpacity(v=>Math.min(100,v+1))}/>
+                <button className="num-spin-dn" onClick={()=>setRefOpacity(v=>Math.max(10,v-1))}/>
+              </div>
               <span className="bb-sep"/>
             </>}
             <label className="bb-label">表示</label>
             <input type="range" min="20" max="400" value={viewZoom} onChange={e=>setViewZoom(+e.target.value)} className="zoom-slider" title="表示サイズ"/>
-            <div className="step-pair">
-              <button className="size-step-btn" onClick={()=>setViewZoom(v=>Math.max(20,v-1))}>−</button>
-              <button className="size-step-btn" onClick={()=>setViewZoom(v=>Math.min(400,v+1))}>+</button>
-            </div>
             <span className="bb-val">{viewZoom}%</span>
+            <div className="num-spin-arrows" style={{height:20}}>
+              <button className="num-spin-up" onClick={()=>setViewZoom(v=>Math.min(400,v+1))}/>
+              <button className="num-spin-dn" onClick={()=>setViewZoom(v=>Math.max(20,v-1))}/>
+            </div>
             {(viewZoom!==100||panOffset.x!==0||panOffset.y!==0)&&<button className="bb-reset-btn" onClick={()=>{setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}} title="表示位置・拡大率をリセット">⟳</button>}
             {viewRotation!==0&&<>
               <span className="bb-sep"/>
@@ -2878,13 +2878,13 @@ export default function App() {
                 value={practiceMode?practiceOverlayOpacity:refOverlayOpacity}
                 onChange={e=>practiceMode?setPracticeOverlayOpacity(+e.target.value):setRefOverlayOpacity(+e.target.value)}
                 className="split-slider" style={{width:72}}/>
-              <div className="step-pair">
-                <button className="size-step-btn" onClick={()=>practiceMode?setPracticeOverlayOpacity(v=>Math.max(0,v-1)):setRefOverlayOpacity(v=>Math.max(0,v-1))}>−</button>
-                <button className="size-step-btn" onClick={()=>practiceMode?setPracticeOverlayOpacity(v=>Math.min(100,v+1)):setRefOverlayOpacity(v=>Math.min(100,v+1))}>+</button>
-              </div>
               <span style={{color:'#aaa',fontSize:11,flexShrink:0,minWidth:26}}>
                 {practiceMode?practiceOverlayOpacity:refOverlayOpacity}%
               </span>
+              <div className="num-spin-arrows" style={{height:20}}>
+                <button className="num-spin-up" onClick={()=>practiceMode?setPracticeOverlayOpacity(v=>Math.min(100,v+1)):setRefOverlayOpacity(v=>Math.min(100,v+1))}/>
+                <button className="num-spin-dn" onClick={()=>practiceMode?setPracticeOverlayOpacity(v=>Math.max(0,v-1)):setRefOverlayOpacity(v=>Math.max(0,v-1))}/>
+              </div>
             </>}
             {(refImage||practiceMode)&&<button className={`bb-crop-btn${(practiceMode?practiceOverlay:refOverlay)?' bb-crop-reset':''}`} onClick={()=>practiceMode?setPracticeOverlay(v=>!v):setRefOverlay(v=>!v)} title="描画パネルに重ねて表示"><OverlayIcon/></button>}
             {refImage&&!practiceMode&&<button className="bb-crop-btn" onClick={resetAllLayers} title="参考画像を初期状態にリセット" style={{color:'#e07070'}}><ResetIcon/></button>}
@@ -2936,9 +2936,13 @@ export default function App() {
                       <div className="tool-size-row">
                         <span className="tool-label">太さ</span>
                         <input type="range" min="1" max="100" value={penSize} onChange={e=>setPenSize(+e.target.value)} className="tool-slider"/>
-                        <button className="size-step-btn" onClick={()=>setPenSize(v=>Math.max(1,v-1))}>−</button>
-                        <input type="number" min="1" max="100" value={penSize} onChange={e=>{const v=Math.max(1,Math.min(100,+e.target.value||1));setPenSize(v)}} className="tool-size-input"/>
-                        <button className="size-step-btn" onClick={()=>setPenSize(v=>Math.min(100,v+1))}>+</button>
+                        <div className="num-spin">
+                          <input type="number" min="1" max="100" value={penSize} onChange={e=>{const v=Math.max(1,Math.min(100,+e.target.value||1));setPenSize(v)}} className="tool-size-input"/>
+                          <div className="num-spin-arrows">
+                            <button className="num-spin-up" onClick={()=>setPenSize(v=>Math.min(100,v+1))}/>
+                            <button className="num-spin-dn" onClick={()=>setPenSize(v=>Math.max(1,v-1))}/>
+                          </div>
+                        </div>
                       </div>
                       <label className="pressure-toggle-row" title="ワコム等のペンタブレットで筆圧を線の太さに反映します">
                         <input type="checkbox" checked={pressureSensitivity} onChange={e=>setPressureSensitivity(e.target.checked)}/>
@@ -2952,9 +2956,13 @@ export default function App() {
                       <div className="tool-size-row">
                         <span className="tool-label">太さ</span>
                         <input type="range" min="1" max="80" value={eraserSize} onChange={e=>setEraserSize(+e.target.value)} className="tool-slider"/>
-                        <button className="size-step-btn" onClick={()=>setEraserSize(v=>Math.max(1,v-1))}>−</button>
-                        <input type="number" min="1" max="999" value={eraserSize} onChange={e=>{const v=Math.max(1,Math.min(999,+e.target.value||1));setEraserSize(v)}} className="tool-size-input"/>
-                        <button className="size-step-btn" onClick={()=>setEraserSize(v=>Math.min(999,v+1))}>+</button>
+                        <div className="num-spin">
+                          <input type="number" min="1" max="999" value={eraserSize} onChange={e=>{const v=Math.max(1,Math.min(999,+e.target.value||1));setEraserSize(v)}} className="tool-size-input"/>
+                          <div className="num-spin-arrows">
+                            <button className="num-spin-up" onClick={()=>setEraserSize(v=>Math.min(999,v+1))}/>
+                            <button className="num-spin-dn" onClick={()=>setEraserSize(v=>Math.max(1,v-1))}/>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </>}
@@ -2974,25 +2982,37 @@ export default function App() {
                         <div className="tool-size-row">
                           <span className="tool-label">px</span>
                           <input type="range" min="20" max="500" value={gridSize} onChange={e=>setGridSize(+e.target.value)} className="tool-slider"/>
-                          <button className="size-step-btn" onClick={()=>setGridSize(v=>Math.max(1,v-1))}>−</button>
-                          <input type="number" min="1" max="2000" value={gridSize} onChange={e=>{const v=Math.max(1,+e.target.value||1);setGridSize(v)}} className="tool-size-input"/>
-                          <button className="size-step-btn" onClick={()=>setGridSize(v=>Math.min(2000,v+1))}>+</button>
+                          <div className="num-spin">
+                            <input type="number" min="1" max="2000" value={gridSize} onChange={e=>{const v=Math.max(1,+e.target.value||1);setGridSize(v)}} className="tool-size-input"/>
+                            <div className="num-spin-arrows">
+                              <button className="num-spin-up" onClick={()=>setGridSize(v=>Math.min(2000,v+1))}/>
+                              <button className="num-spin-dn" onClick={()=>setGridSize(v=>Math.max(1,v-1))}/>
+                            </div>
+                          </div>
                         </div>
                       ):(
                         <div className="tool-size-row">
                           <span className="tool-label">分割</span>
                           <input type="range" min="2" max="20" value={-gridSize} onChange={e=>setGridSize(-e.target.value)} className="tool-slider"/>
-                          <button className="size-step-btn" onClick={()=>setGridSize(v=>Math.min(-1,v+1))}>−</button>
-                          <input type="number" min="1" max="32" value={-gridSize} onChange={e=>{const v=Math.max(1,Math.min(32,+e.target.value||1));setGridSize(-v)}} className="tool-size-input"/>
-                          <button className="size-step-btn" onClick={()=>setGridSize(v=>Math.max(-32,v-1))}>+</button>
+                          <div className="num-spin">
+                            <input type="number" min="1" max="32" value={-gridSize} onChange={e=>{const v=Math.max(1,Math.min(32,+e.target.value||1));setGridSize(-v)}} className="tool-size-input"/>
+                            <div className="num-spin-arrows">
+                              <button className="num-spin-up" onClick={()=>setGridSize(v=>Math.max(-32,v-1))}/>
+                              <button className="num-spin-dn" onClick={()=>setGridSize(v=>Math.min(-1,v+1))}/>
+                            </div>
+                          </div>
                         </div>
                       )}
                       <div className="tool-size-row" style={{marginTop:6}}>
                         <span className="tool-label">濃度</span>
                         <input type="range" min="10" max="100" value={gridOpacity} onChange={e=>setGridOpacity(+e.target.value)} className="tool-slider"/>
-                        <button className="size-step-btn" onClick={()=>setGridOpacity(v=>Math.max(10,v-1))}>−</button>
-                        <input type="number" min="10" max="100" value={gridOpacity} onChange={e=>{const v=Math.max(10,Math.min(100,+e.target.value||10));setGridOpacity(v)}} className="tool-size-input"/>
-                        <button className="size-step-btn" onClick={()=>setGridOpacity(v=>Math.min(100,v+1))}>+</button>
+                        <div className="num-spin">
+                          <input type="number" min="10" max="100" value={gridOpacity} onChange={e=>{const v=Math.max(10,Math.min(100,+e.target.value||10));setGridOpacity(v)}} className="tool-size-input"/>
+                          <div className="num-spin-arrows">
+                            <button className="num-spin-up" onClick={()=>setGridOpacity(v=>Math.min(100,v+1))}/>
+                            <button className="num-spin-dn" onClick={()=>setGridOpacity(v=>Math.max(10,v-1))}/>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </>}
@@ -3032,9 +3052,13 @@ export default function App() {
                           {ar.type==='div'&&<div className="tool-size-row">
                             <span className="tool-label">分割数</span>
                             <input type="range" min="2" max="24" value={ar.divisions} onChange={e=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,divisions:+e.target.value}:r))} className="tool-slider"/>
-                            <button className="size-step-btn" onClick={()=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,divisions:Math.max(2,r.divisions-1)}:r))}>−</button>
-                            <input type="number" min="2" max="24" value={ar.divisions} onChange={e=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,divisions:Math.max(2,Math.min(24,+e.target.value||2))}:r))} className="tool-size-input"/>
-                            <button className="size-step-btn" onClick={()=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,divisions:Math.min(24,r.divisions+1)}:r))}>+</button>
+                            <div className="num-spin">
+                              <input type="number" min="2" max="24" value={ar.divisions} onChange={e=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,divisions:Math.max(2,Math.min(24,+e.target.value||2))}:r))} className="tool-size-input"/>
+                              <div className="num-spin-arrows">
+                                <button className="num-spin-up" onClick={()=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,divisions:Math.min(24,r.divisions+1)}:r))}/>
+                                <button className="num-spin-dn" onClick={()=>setRulers(rs=>rs.map(r=>r.id===ar.id?{...r,divisions:Math.max(2,r.divisions-1)}:r))}/>
+                              </div>
+                            </div>
                           </div>}
                         </div>}
                         {activeTool===TOOLS.RULER&&<div className="ruler-default-section">
@@ -3052,9 +3076,13 @@ export default function App() {
                           {rulerType==='div'&&<div className="tool-size-row">
                             <span className="tool-label">分割数</span>
                             <input type="range" min="2" max="24" value={rulerDivisions} onChange={e=>setRulerDivisions(+e.target.value)} className="tool-slider"/>
-                            <button className="size-step-btn" onClick={()=>setRulerDivisions(v=>Math.max(2,v-1))}>−</button>
-                            <input type="number" min="2" max="24" value={rulerDivisions} onChange={e=>setRulerDivisions(Math.max(2,Math.min(24,+e.target.value||2)))} className="tool-size-input"/>
-                            <button className="size-step-btn" onClick={()=>setRulerDivisions(v=>Math.min(24,v+1))}>+</button>
+                            <div className="num-spin">
+                              <input type="number" min="2" max="24" value={rulerDivisions} onChange={e=>setRulerDivisions(Math.max(2,Math.min(24,+e.target.value||2)))} className="tool-size-input"/>
+                              <div className="num-spin-arrows">
+                                <button className="num-spin-up" onClick={()=>setRulerDivisions(v=>Math.min(24,v+1))}/>
+                                <button className="num-spin-dn" onClick={()=>setRulerDivisions(v=>Math.max(2,v-1))}/>
+                              </div>
+                            </div>
                           </div>}
                         </div>}
                         {rulers.length===0&&activeTool!==TOOLS.RULER&&<p className="ruler-hint">定規ツールをONにしてドラッグ</p>}
@@ -3080,9 +3108,13 @@ export default function App() {
                       <label>不透明度<span>{refOpacity}%</span></label>
                       <div className="tool-size-row">
                         <input type="range" min="0" max="100" value={refOpacity} onChange={e=>setRefOpacity(+e.target.value)} style={{flex:1,width:'auto'}}/>
-                        <button className="size-step-btn" onClick={()=>setRefOpacity(v=>Math.max(0,v-1))}>−</button>
-                        <input type="number" min="0" max="100" value={refOpacity} onChange={e=>setRefOpacity(Math.max(0,Math.min(100,+e.target.value||0)))} className="tool-size-input"/>
-                        <button className="size-step-btn" onClick={()=>setRefOpacity(v=>Math.min(100,v+1))}>+</button>
+                        <div className="num-spin">
+                          <input type="number" min="0" max="100" value={refOpacity} onChange={e=>setRefOpacity(Math.max(0,Math.min(100,+e.target.value||0)))} className="tool-size-input"/>
+                          <div className="num-spin-arrows">
+                            <button className="num-spin-up" onClick={()=>setRefOpacity(v=>Math.min(100,v+1))}/>
+                            <button className="num-spin-dn" onClick={()=>setRefOpacity(v=>Math.max(0,v-1))}/>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -3091,9 +3123,13 @@ export default function App() {
                       <label>不透明度<span>{activeLayer.opacity}%</span></label>
                       <div className="tool-size-row">
                         <input type="range" min="0" max="100" value={activeLayer.opacity} onChange={e=>updLayer(activeLayerId,{opacity:+e.target.value})} style={{flex:1,width:'auto'}}/>
-                        <button className="size-step-btn" onClick={()=>updLayer(activeLayerId,{opacity:Math.max(0,activeLayer.opacity-1)})}>−</button>
-                        <input type="number" min="0" max="100" value={activeLayer.opacity} onChange={e=>updLayer(activeLayerId,{opacity:Math.max(0,Math.min(100,+e.target.value||0))})} className="tool-size-input"/>
-                        <button className="size-step-btn" onClick={()=>updLayer(activeLayerId,{opacity:Math.min(100,activeLayer.opacity+1)})}>+</button>
+                        <div className="num-spin">
+                          <input type="number" min="0" max="100" value={activeLayer.opacity} onChange={e=>updLayer(activeLayerId,{opacity:Math.max(0,Math.min(100,+e.target.value||0))})} className="tool-size-input"/>
+                          <div className="num-spin-arrows">
+                            <button className="num-spin-up" onClick={()=>updLayer(activeLayerId,{opacity:Math.min(100,activeLayer.opacity+1)})}/>
+                            <button className="num-spin-dn" onClick={()=>updLayer(activeLayerId,{opacity:Math.max(0,activeLayer.opacity-1)})}/>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}
