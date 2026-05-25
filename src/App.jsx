@@ -2086,7 +2086,8 @@ export default function App() {
     navigator.hid.getDevices().then(async devices=>{
       for(const device of devices){
         try{
-          await device.open()
+          if(!device.opened) await device.open()
+          device.removeEventListener('inputreport', handleTabmateReport)
           device.addEventListener('inputreport', handleTabmateReport)
           tabmateDeviceRef.current = device
           tabmateLastReport.current = null
