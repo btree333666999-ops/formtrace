@@ -812,7 +812,6 @@ export default function App() {
   const [showTabmatePanel,setShowTabmatePanel] = useState(false)
   const [tabmateConnected,setTabmateConnected] = useState(false)
   const [tabmateLearning,setTabmateLearning]   = useState(null)
-  const [tabmateFlash,setTabmateFlash]         = useState(null)  // action name that is flashing
   const [tabmateMappings,setTabmateMappings]   = useState(()=>{
     try{return JSON.parse(localStorage.getItem('tabmate-mappings')||'{}')}catch{return {}}
   })
@@ -1175,12 +1174,6 @@ export default function App() {
       navUpdate()
     }
   },[cvW,cvH,navUpdate,dispSize])
-  // Scroll flashed tabmate row into view if it's outside the visible panel area
-  useEffect(()=>{
-    if(!tabmateFlash)return
-    const el=document.querySelector(`.tabmate-map-list [data-action="${tabmateFlash}"]`)
-    el?.scrollIntoView({behavior:'smooth',block:'nearest'})
-  },[tabmateFlash])
 
   useEffect(()=>{comp()},[comp,showGrid,gridVisible,gridSize,gridOpacity])
   useEffect(()=>{comp()},[comp,refOpacity])
@@ -2024,9 +2017,14 @@ export default function App() {
     // ── Presses → execute action ──────────────────────────────────
     const TOOL_CONSTS={pen:TOOLS.PEN,eraser:TOOLS.ERASER,select:TOOLS.SELECT,move:TOOLS.MOVE,line:TOOLS.LINE,ruler:TOOLS.RULER,hand:TOOLS.HAND,rotateCanvas:TOOLS.ROTATE}
     const flash=a=>{
-      setTabmateFlash(a)
       clearTimeout(tabmateFlashTimer.current)
-      tabmateFlashTimer.current=setTimeout(()=>setTabmateFlash(null),1500)
+      const prev=document.querySelector('.tabmate-row.tabmate-flash')
+      if(prev){prev.classList.remove('tabmate-flash');void prev.offsetWidth}
+      const el=document.querySelector(`.tabmate-map-list [data-action="${a}"]`)
+      if(el){el.classList.add('tabmate-flash');el.scrollIntoView({behavior:'smooth',block:'nearest'})}
+      tabmateFlashTimer.current=setTimeout(()=>{
+        document.querySelector('.tabmate-row.tabmate-flash')?.classList.remove('tabmate-flash')
+      },1500)
     }
     for(const {i,v} of presses){
       const btnKey = `${rid}:${i}:${v}`
@@ -2539,7 +2537,7 @@ export default function App() {
                         }
                         const modeLabel=modeType==='default'?'デフォルト':modeType==='temporary'?'一時切替':modeType==='hold'?'ホールド':'ローテーション'
                         return(
-                          <div key={a} data-action={a} className={`tabmate-row sc-row-wrap${tabmateFlash===a?' tabmate-flash':''}`}>
+                          <div key={a} data-action={a} className="tabmate-row sc-row-wrap">
                             <span className="tabmate-action">{l}</span>
                             <button className={`tabmate-learn-btn${learning?' learning':mapped?' configured':''}`}
                               onClick={()=>{const next=learning?null:a;setTabmateLearning(next);tabmateLearningRef.current=next}}>
