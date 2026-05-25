@@ -2454,7 +2454,7 @@ export default function App() {
     const obj=genCompound();practiceObjRef.current=obj;setPracticeObject({...obj});setPracticeMode(true)
     const phi=.18+obj.ep*.52, theta=obj.rot*8+obj.skX*3
     setPracticeOrbit({rx:phi,ry:theta,rz:0,zoom:1})
-    resizePracticeCanvas(3600,900)
+    resizePracticeCanvas(DEFAULT_W,DEFAULT_H)
   }
 
   return (
