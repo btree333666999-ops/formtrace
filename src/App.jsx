@@ -845,7 +845,6 @@ export default function App() {
   const shiftKeyRef     = useRef(false)
   const penShiftSnapRef = useRef(null)
   const smoothPtRef     = useRef(null)
-  const rafIdRef        = useRef(null)   // rAF handle for throttled comp()
   const wetCanvasRef    = useRef(null)   // temporary canvas for in-progress pen stroke
   const frameBufferRef  = useRef(null)   // cached composite snapshot (pre-stroke) for fast path
   const dirtyRectRef    = useRef(null)   // ① dirty rect: bounding box of pixels changed since last comp()
@@ -1551,18 +1550,19 @@ export default function App() {
         ctx.globalCompositeOperation='source-over'
       }
       // Shift-snap snapshot captures layer canvas state (wet canvas content not included)
-      const _snap=document.createElement('canvas');_snap.width=_cw;_snap.height=_ch
-      _snap.getContext('2d').drawImage(draw,0,0);penShiftSnapRef.current=_snap
+      // サイズが変わった時のみ createElement（毎ストロークの 11.76MB 確保＋GC を防ぐ）
+      if(!penShiftSnapRef.current||penShiftSnapRef.current.width!==_cw||penShiftSnapRef.current.height!==_ch){
+        penShiftSnapRef.current=document.createElement('canvas')
+        penShiftSnapRef.current.width=_cw;penShiftSnapRef.current.height=_ch
+      }
+      penShiftSnapRef.current.getContext('2d').drawImage(draw,0,0)
       // Frame buffer: snapshot of the display BEFORE this stroke — used by the fast comp() path
       if(!frameBufferRef.current||frameBufferRef.current.width!==_cw||frameBufferRef.current.height!==_ch){
         frameBufferRef.current=document.createElement('canvas')
         frameBufferRef.current.width=_cw;frameBufferRef.current.height=_ch
       }
       if(displayRef.current)frameBufferRef.current.getContext('2d').drawImage(displayRef.current,0,0)
-      // ① rAF: schedule composite on next vsync
-      if(!rafIdRef.current){
-        rafIdRef.current=requestAnimationFrame(()=>{rafIdRef.current=null;comp()})
-      }
+      comp()
     } else if(activeTool===TOOLS.LINE){
       const {showGrid:sg,gridSize:gs}=S.current
       const spt=e.shiftKey&&sg?applySnap(pt,{gridSnap:true,gridSize:gs}):pt
@@ -1747,10 +1747,9 @@ export default function App() {
           else{dirtyRectRef.current={x:drx0,y:dry0,w:drx1-drx0,h:dry1-dry0}}
         }
       }
-      // ① rAF throttle: composite at most once per vsync instead of every pointermove
-      if(!rafIdRef.current){
-        rafIdRef.current=requestAnimationFrame(()=>{rafIdRef.current=null;comp()})
-      }
+      // dirty rect で描画範囲を限定しているため comp() は元の全レイヤー合成より大幅に軽い。
+      // rAF で遅延させると1フレーム分の描画ラグが生まれるため、同期的に呼ぶ。
+      comp()
     } else if(activeTool===TOOLS.LINE&&lineStart.current&&lineStartScreen.current){
       comp()
       const disp=displayRef.current;if(!disp)return
@@ -1826,8 +1825,6 @@ export default function App() {
       saveHist();return
     }
     if(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER){
-      // ① Cancel any rAF scheduled during the stroke
-      if(rafIdRef.current){cancelAnimationFrame(rafIdRef.current);rafIdRef.current=null}
       if(activeTool===TOOLS.PEN&&draw){
         const {w:cw,h:ch}=cvRef.current
         const pts=strokePtsRef.current
