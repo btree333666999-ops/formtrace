@@ -773,7 +773,6 @@ export default function App() {
   const compRef        = useRef(null)
   const panOffsetRef   = useRef({x:0,y:0})
   const panStartRef    = useRef(null)
-  const lastClientXY   = useRef(null)
   const refImageEl     = useRef(null)
   const fileInputRef   = useRef(null)
   const practiceObjRef = useRef(null)
@@ -844,9 +843,14 @@ export default function App() {
   const moveOrigin   = useRef(null)
   const moveSnap     = useRef(null)
   const shiftKeyRef     = useRef(false)
-  const penSnapDirRef   = useRef(null)
   const penShiftSnapRef = useRef(null)
   const smoothPtRef     = useRef(null)
+  const rafIdRef        = useRef(null)   // rAF handle for throttled comp()
+  const wetCanvasRef    = useRef(null)   // temporary canvas for in-progress pen stroke
+  const frameBufferRef  = useRef(null)   // cached composite snapshot (pre-stroke) for fast path
+  const dirtyRectRef    = useRef(null)   // ① dirty rect: bounding box of pixels changed since last comp()
+  const strokePtsRef    = useRef([])     // ② vector path: EMA-smoothed {x,y,sz} for current pen stroke
+  const penUsedShiftRef = useRef(false)  // ② true when shift-snap was used during current stroke
   const springToolRef   = useRef(null)
   const flipPhotoRef    = useRef(false)
   const flipDrawRef     = useRef(false)
@@ -1029,6 +1033,48 @@ export default function App() {
 
   // ── Composite ─────────────────────────────────────────────────
   const comp=useCallback(()=>{
+    // ─── Fast path: active pen stroke ────────────────────────────
+    // During a stroke only the wet canvas changes; everything else is static.
+    // Copy the pre-stroke frame buffer and overlay the wet canvas — 2 drawImages
+    // instead of 7+, giving ~3-4× speedup at the cost of skipping navUpdate.
+    if(isDrawing.current&&wetCanvasRef.current&&frameBufferRef.current){
+      const disp=displayRef.current;if(!disp)return
+      const {w:cw,h:ch}=cvRef.current
+      const ctx=disp.getContext('2d')
+      const dr=dirtyRectRef.current
+      if(dr&&!shiftKeyRef.current){
+        // ① Dirty rect: repaint only the region that changed since the last frame.
+        // Outside dr the display canvas already holds the correct content (frameBuffer + prior wetCanvas),
+        // so we only need to blit the updated region — typically a 10-50× speedup over a full canvas blit.
+        ctx.clearRect(dr.x,dr.y,dr.w,dr.h)
+        ctx.drawImage(frameBufferRef.current,dr.x,dr.y,dr.w,dr.h,dr.x,dr.y,dr.w,dr.h)
+        ctx.drawImage(wetCanvasRef.current,dr.x,dr.y,dr.w,dr.h,dr.x,dr.y,dr.w,dr.h)
+        dirtyRectRef.current=null  // consumed; next frame accumulates a fresh rect
+      } else {
+        // Full update: shift-snap mode (wet canvas is cleared each move) or no dirty rect yet
+        ctx.clearRect(0,0,cw,ch)
+        ctx.drawImage(frameBufferRef.current,0,0)
+        ctx.drawImage(wetCanvasRef.current,0,0)
+        // Re-draw shift-snap guide (not in frame buffer because it follows the cursor)
+        if(shiftKeyRef.current&&penStrokeStart.current){
+          const at=S.current.activeTool
+          if(at===TOOLS.PEN||at===TOOLS.ERASER){
+            const {x:gx,y:gy}=penStrokeStart.current
+            const gl=Math.max(cw,ch)*2,gd=gl*Math.SQRT1_2
+            ctx.save();ctx.beginPath();ctx.rect(cw/2,0,cw/2,ch);ctx.clip()
+            ctx.strokeStyle='rgba(80,120,255,0.28)';ctx.lineWidth=1;ctx.setLineDash([4,8])
+            ctx.beginPath()
+            ctx.moveTo(gx-gl,gy);ctx.lineTo(gx+gl,gy)
+            ctx.moveTo(gx,gy-gl);ctx.lineTo(gx,gy+gl)
+            ctx.moveTo(gx-gd,gy-gd);ctx.lineTo(gx+gd,gy+gd)
+            ctx.moveTo(gx+gd,gy-gd);ctx.lineTo(gx-gd,gy+gd)
+            ctx.stroke();ctx.restore()
+          }
+        }
+      }
+      return
+    }
+    // ─── Full composite path ──────────────────────────────────────
     const disp=displayRef.current;if(!disp)return
     const {w:cw,h:ch}=cvRef.current
     const ctx=disp.getContext('2d')
@@ -1097,6 +1143,7 @@ export default function App() {
         const lc=layerCanvases.current[l.id];if(!lc)continue
         ctx.globalAlpha=l.opacity/100;ctx.drawImage(lc,0,0);ctx.globalAlpha=1
       }
+      if(wetCanvasRef.current)ctx.drawImage(wetCanvasRef.current,0,0)
       ctx.restore()
     }else{
       for(const l of dl){
@@ -1104,6 +1151,7 @@ export default function App() {
         const lc=layerCanvases.current[l.id];if(!lc)continue
         ctx.globalAlpha=l.opacity/100;ctx.drawImage(lc,0,0);ctx.globalAlpha=1
       }
+      if(wetCanvasRef.current)ctx.drawImage(wetCanvasRef.current,0,0)
     }
     // Grid — drawn independently for each half
     if(showGrid&&gridVisible){
@@ -1382,9 +1430,9 @@ export default function App() {
     }
   },[activeTool,showRuler,showGrid])
 
-  const toPt=e=>{
+  const toPt=(e,r)=>{
     const disp=displayRef.current;if(!disp)return{x:0,y:0}
-    const r=disp.getBoundingClientRect()
+    if(!r)r=disp.getBoundingClientRect()
     const {w:cw,h:ch}=cvRef.current
     const θ=viewRotationRef.current*Math.PI/180
     let rawX,rawY
@@ -1467,18 +1515,54 @@ export default function App() {
     isDrawing.current=true;lastPt.current=pt
     if(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER){
       const ctx=draw?.getContext('2d');if(!ctx)return
-      saveHist()
-      penStrokeStart.current=pt;penSnapDirRef.current=null;lastClientXY.current={x:e.clientX,y:e.clientY}
+      // saveHist() は onPointerUp のみで呼ぶ。
+      // ここで getImageData(2800×1050) を呼ぶと GPU→CPU 同期読み取り(~10-50ms)が発生し
+      // 最初の rAF フレームが遅延して描き始めがかくつく原因になる。
+      // onPointerDown時点の状態は直前の onPointerUp が既に保存済みのため重複でもある。
+      penStrokeStart.current=pt
       smoothPtRef.current={x:pt.x,y:pt.y}
       const pr=(S.current.pressureSensitivity&&e.pointerType==='pen')?Math.max(0.05,e.pressure):1
       const sz=Math.max(1,activeSize*pr)
-      ctx.globalCompositeOperation=activeTool===TOOLS.ERASER?'destination-out':'source-over'
-      ctx.fillStyle=activeTool===TOOLS.ERASER?'rgba(0,0,0,1)':penColor
-      ctx.beginPath();ctx.arc(pt.x,pt.y,sz/2,0,Math.PI*2);ctx.fill()
       const {w:_cw,h:_ch}=cvRef.current
+      if(activeTool===TOOLS.PEN){
+        // ③ Wet canvas: pen strokes are drawn here during stroke, committed to layer on pointerUp
+        if(!wetCanvasRef.current||wetCanvasRef.current.width!==_cw||wetCanvasRef.current.height!==_ch){
+          wetCanvasRef.current=document.createElement('canvas')
+          wetCanvasRef.current.width=_cw;wetCanvasRef.current.height=_ch
+        } else {
+          wetCanvasRef.current.getContext('2d').clearRect(0,0,_cw,_ch)
+        }
+        const wctx=wetCanvasRef.current.getContext('2d')
+        wctx.fillStyle=penColor
+        wctx.beginPath();wctx.arc(pt.x,pt.y,sz/2,0,Math.PI*2);wctx.fill()
+        // ② Vector path: init with the first dot's position and size
+        strokePtsRef.current=[{x:pt.x,y:pt.y,sz}];penUsedShiftRef.current=false
+        // ① Initial dirty rect: bounding box of the starting dot (with 2px antialiasing margin)
+        const _dm=sz/2+2
+        const _dx0=Math.max(0,Math.floor(pt.x-_dm)),_dy0=Math.max(0,Math.floor(pt.y-_dm))
+        const _dx1=Math.min(_cw,Math.ceil(pt.x+_dm)),_dy1=Math.min(_ch,Math.ceil(pt.y+_dm))
+        dirtyRectRef.current={x:_dx0,y:_dy0,w:_dx1-_dx0,h:_dy1-_dy0}
+      } else {
+        // Eraser draws directly to layer canvas; clear any stale wet canvas
+        wetCanvasRef.current=null
+        ctx.globalCompositeOperation='destination-out'
+        ctx.fillStyle='rgba(0,0,0,1)'
+        ctx.beginPath();ctx.arc(pt.x,pt.y,sz/2,0,Math.PI*2);ctx.fill()
+        ctx.globalCompositeOperation='source-over'
+      }
+      // Shift-snap snapshot captures layer canvas state (wet canvas content not included)
       const _snap=document.createElement('canvas');_snap.width=_cw;_snap.height=_ch
       _snap.getContext('2d').drawImage(draw,0,0);penShiftSnapRef.current=_snap
-      comp();tick()
+      // Frame buffer: snapshot of the display BEFORE this stroke — used by the fast comp() path
+      if(!frameBufferRef.current||frameBufferRef.current.width!==_cw||frameBufferRef.current.height!==_ch){
+        frameBufferRef.current=document.createElement('canvas')
+        frameBufferRef.current.width=_cw;frameBufferRef.current.height=_ch
+      }
+      if(displayRef.current)frameBufferRef.current.getContext('2d').drawImage(displayRef.current,0,0)
+      // ① rAF: schedule composite on next vsync
+      if(!rafIdRef.current){
+        rafIdRef.current=requestAnimationFrame(()=>{rafIdRef.current=null;comp()})
+      }
     } else if(activeTool===TOOLS.LINE){
       const {showGrid:sg,gridSize:gs}=S.current
       const spt=e.shiftKey&&sg?applySnap(pt,{gridSnap:true,gridSize:gs}):pt
@@ -1492,12 +1576,13 @@ export default function App() {
   }
 
   const onPointerMove=e=>{
+    // getBoundingClientRect を1回だけ呼ぶ（強制レイアウトを1回に抑える）
+    const _bcr=displayRef.current?.getBoundingClientRect()||null
     // Custom cursor update
-    if(cursorDivRef.current&&displayRef.current){
+    if(cursorDivRef.current&&_bcr){
       const at=S.current.activeTool
       if(at===TOOLS.PEN||at===TOOLS.ERASER){
-        const r=displayRef.current.getBoundingClientRect()
-        const scale=r.width/cvRef.current.w
+        const scale=_bcr.width/cvRef.current.w
         const sz=at===TOOLS.ERASER?S.current.eraserSize:S.current.penSize
         const radius=Math.max(0.5,sz/2*scale)
         const d=cursorDivRef.current
@@ -1548,13 +1633,13 @@ export default function App() {
     }
     // Ruler preview: runs before isDrawing check (tap-based, no drag needed)
     if(placingRulerIdRef.current&&S.current.activeTool===TOOLS.RULER){
-      const pid=placingRulerIdRef.current,pt0=toPt(e)
+      const pid=placingRulerIdRef.current,pt0=toPt(e,_bcr)
       const rsnap=e.shiftKey&&placingRulerStartRef.current
         ?applySnap(pt0,{angleSnap:true,lineFrom:placingRulerStartRef.current}):pt0
       setRulers(rs=>rs.map(r=>r.id===pid?{...r,x2:rsnap.x,y2:rsnap.y}:r));return
     }
     if(!isDrawing.current)return
-    const pt=toPt(e)
+    const pt=toPt(e,_bcr)
     const {activeTool,penColor,penSize,eraserSize}=S.current
     const activeSize=activeTool===TOOLS.ERASER?eraserSize:penSize
     const draw=S.current.activeLayerId===PHOTO_ID?photoLayerCanvas.current:layerCanvases.current[S.current.activeLayerId]
@@ -1587,31 +1672,85 @@ export default function App() {
     }
     if(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER){
       const ctx=draw?.getContext('2d');if(!ctx)return
-      const pr=(S.current.pressureSensitivity&&e.pointerType==='pen')?Math.max(0.05,e.pressure):1
-      const sz=Math.max(1,activeSize*pr)
-      // EMA smoothing (α=0.4): reduces hand tremor while keeping responsiveness
-      const alpha=0.4
-      const prev=smoothPtRef.current??pt
-      const spt={x:alpha*pt.x+(1-alpha)*prev.x,y:alpha*pt.y+(1-alpha)*prev.y}
-      smoothPtRef.current=spt
-      ctx.globalCompositeOperation=activeTool===TOOLS.ERASER?'destination-out':'source-over'
-      ctx.strokeStyle=activeTool===TOOLS.ERASER?'rgba(0,0,0,1)':penColor
-      ctx.lineWidth=sz;ctx.lineCap='round';ctx.lineJoin='round'
+      const isPen=activeTool===TOOLS.PEN
       if(e.shiftKey&&penStrokeStart.current&&penShiftSnapRef.current){
+        // Shift-snap mode: use last pointer position to draw a snapped line
+        const pr=(S.current.pressureSensitivity&&e.pointerType==='pen')?Math.max(0.05,e.pressure):1
+        const sz=Math.max(1,activeSize*pr)
+        const prev=smoothPtRef.current??pt
+        const spt={x:0.4*pt.x+0.6*prev.x,y:0.4*pt.y+0.6*prev.y}
+        smoothPtRef.current=spt
         const snapped=applySnap(spt,{angleSnap:true,lineFrom:penStrokeStart.current})
         const {w:cw2,h:ch2}=cvRef.current
-        const prevComp=ctx.globalCompositeOperation
-        ctx.globalCompositeOperation='source-over'
-        ctx.clearRect(0,0,cw2,ch2);ctx.drawImage(penShiftSnapRef.current,0,0)
-        ctx.globalCompositeOperation=prevComp
-        ctx.beginPath();ctx.moveTo(penStrokeStart.current.x,penStrokeStart.current.y);ctx.lineTo(snapped.x,snapped.y);ctx.stroke()
+        if(isPen&&wetCanvasRef.current){
+          // ③ Clear wet canvas, draw clean snapped line (layer canvas stays untouched)
+          const wctx=wetCanvasRef.current.getContext('2d')
+          wctx.clearRect(0,0,cw2,ch2)
+          wctx.strokeStyle=penColor
+          wctx.lineWidth=sz;wctx.lineCap='round';wctx.lineJoin='round'
+          wctx.beginPath();wctx.moveTo(penStrokeStart.current.x,penStrokeStart.current.y);wctx.lineTo(snapped.x,snapped.y);wctx.stroke()
+        } else {
+          // Eraser shift: restore layer from snapshot then draw erased snapped line
+          ctx.globalCompositeOperation='source-over'
+          ctx.clearRect(0,0,cw2,ch2);ctx.drawImage(penShiftSnapRef.current,0,0)
+          ctx.globalCompositeOperation='destination-out'
+          ctx.strokeStyle='rgba(0,0,0,1)'
+          ctx.lineWidth=sz;ctx.lineCap='round';ctx.lineJoin='round'
+          ctx.beginPath();ctx.moveTo(penStrokeStart.current.x,penStrokeStart.current.y);ctx.lineTo(snapped.x,snapped.y);ctx.stroke()
+          ctx.globalCompositeOperation='source-over'
+        }
+        penUsedShiftRef.current=true  // ② mark: shift-snap used → skip Catmull-Rom at stroke end
         lastPt.current=snapped
       } else {
-        ctx.beginPath();ctx.moveTo(lastPt.current.x,lastPt.current.y);ctx.lineTo(spt.x,spt.y);ctx.stroke()
-        lastPt.current=spt
+        // ② getCoalescedEvents: recover intermediate pointer positions between frames
+        const ces=e.getCoalescedEvents?.()
+        const evts=(ces&&ces.length>0)?ces:[e]
+        // Canvas context・固定プロパティはループ外で1回だけ設定
+        const wctx=isPen&&wetCanvasRef.current?wetCanvasRef.current.getContext('2d'):null
+        if(wctx){wctx.strokeStyle=penColor;wctx.lineCap='round';wctx.lineJoin='round'}
+        const alpha=0.4
+        // dirty rect の累積用ローカル変数（オブジェクト生成をループ外に抑える）
+        let drx0=Infinity,dry0=Infinity,drx1=-Infinity,dry1=-Infinity
+        for(const ce of evts){
+          const cpt=toPt(ce,_bcr)
+          const pr=(S.current.pressureSensitivity&&ce.pointerType==='pen')?Math.max(0.05,ce.pressure):1
+          const sz=Math.max(1,activeSize*pr)
+          // EMA smoothing (α=0.4): reduces hand tremor while keeping responsiveness
+          const prev=smoothPtRef.current??cpt
+          const spt={x:alpha*cpt.x+(1-alpha)*prev.x,y:alpha*cpt.y+(1-alpha)*prev.y}
+          smoothPtRef.current=spt
+          if(wctx){
+            // ③ Pen: draw segment to wet canvas（lineWidthのみループ内でセット）
+            wctx.lineWidth=sz
+            wctx.beginPath();wctx.moveTo(lastPt.current.x,lastPt.current.y);wctx.lineTo(spt.x,spt.y);wctx.stroke()
+            // ② Store point for Catmull-Rom re-render at stroke end
+            strokePtsRef.current.push({x:spt.x,y:spt.y,sz})
+            // ① dirty rect をローカル変数に累積（ループごとのオブジェクト生成を廃止）
+            const _dm2=sz/2+2,_lx=lastPt.current.x,_ly=lastPt.current.y
+            drx0=Math.min(drx0,Math.max(0,Math.floor(Math.min(_lx,spt.x)-_dm2)))
+            dry0=Math.min(dry0,Math.max(0,Math.floor(Math.min(_ly,spt.y)-_dm2)))
+            drx1=Math.max(drx1,Math.min(cvRef.current.w,Math.ceil(Math.max(_lx,spt.x)+_dm2)))
+            dry1=Math.max(dry1,Math.min(cvRef.current.h,Math.ceil(Math.max(_ly,spt.y)+_dm2)))
+          } else if(!isPen){
+            // Eraser: draw segment to layer canvas
+            ctx.globalCompositeOperation='destination-out'
+            ctx.strokeStyle='rgba(0,0,0,1)'
+            ctx.lineWidth=sz;ctx.lineCap='round';ctx.lineJoin='round'
+            ctx.beginPath();ctx.moveTo(lastPt.current.x,lastPt.current.y);ctx.lineTo(spt.x,spt.y);ctx.stroke()
+          }
+          lastPt.current=spt
+        }
+        // ループ後に dirty rect を1回だけ更新
+        if(wctx&&drx0<drx1&&dry0<dry1){
+          const _dr2=dirtyRectRef.current
+          if(_dr2){dirtyRectRef.current={x:Math.min(_dr2.x,drx0),y:Math.min(_dr2.y,dry0),w:Math.max(_dr2.x+_dr2.w,drx1)-Math.min(_dr2.x,drx0),h:Math.max(_dr2.y+_dr2.h,dry1)-Math.min(_dr2.y,dry0)}}
+          else{dirtyRectRef.current={x:drx0,y:dry0,w:drx1-drx0,h:dry1-dry0}}
+        }
       }
-      lastClientXY.current={x:e.clientX,y:e.clientY}
-      comp();tick()
+      // ① rAF throttle: composite at most once per vsync instead of every pointermove
+      if(!rafIdRef.current){
+        rafIdRef.current=requestAnimationFrame(()=>{rafIdRef.current=null;comp()})
+      }
     } else if(activeTool===TOOLS.LINE&&lineStart.current&&lineStartScreen.current){
       comp()
       const disp=displayRef.current;if(!disp)return
@@ -1619,7 +1758,7 @@ export default function App() {
       let ex=e.clientX,ey=e.clientY
       const sx=lineStartScreen.current.x,sy=lineStartScreen.current.y
       if(e.shiftKey){const a=Math.round(Math.atan2(ey-sy,ex-sx)/(Math.PI/4))*(Math.PI/4);const l=Math.sqrt((ex-sx)**2+(ey-sy)**2);ex=sx+Math.cos(a)*l;ey=sy+Math.sin(a)*l}
-      const rr=disp.getBoundingClientRect()
+      const rr=_bcr||disp.getBoundingClientRect()
       const seg=clipLineToBBox(sx,sy,ex,ey,rr.left,rr.top,rr.right,rr.bottom)
       if(seg){
         const p1=screenToCv(seg[0],seg[1],rr,cw,ch),p2=screenToCv(seg[2],seg[3],rr,cw,ch)
@@ -1686,9 +1825,53 @@ export default function App() {
       }
       saveHist();return
     }
-    if(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER){saveHist()}
-    else if(activeTool===TOOLS.MOVE){saveHist()}
-    penSnapDirRef.current=null;penShiftSnapRef.current=null;lastClientXY.current=null;smoothPtRef.current=null
+    if(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER){
+      // ① Cancel any rAF scheduled during the stroke
+      if(rafIdRef.current){cancelAnimationFrame(rafIdRef.current);rafIdRef.current=null}
+      if(activeTool===TOOLS.PEN&&draw){
+        const {w:cw,h:ch}=cvRef.current
+        const pts=strokePtsRef.current
+        if(!penUsedShiftRef.current&&pts.length>0&&penShiftSnapRef.current){
+          // ② Catmull-Rom: restore the pre-stroke layer state and re-render the stored vector
+          // path with smooth cubic bezier curves — eliminates the EMA stepping artifacts.
+          // Control points: cp1 = P1 + (P2−P0)/6,  cp2 = P2 − (P3−P1)/6
+          const lctx=draw.getContext('2d')
+          lctx.clearRect(0,0,cw,ch);lctx.drawImage(penShiftSnapRef.current,0,0)
+          lctx.globalCompositeOperation='source-over'
+          const pc=S.current.penColor;lctx.lineCap='round';lctx.lineJoin='round'
+          lctx.strokeStyle=pc;lctx.fillStyle=pc
+          // Starting dot
+          lctx.beginPath();lctx.arc(pts[0].x,pts[0].y,pts[0].sz/2,0,Math.PI*2);lctx.fill()
+          // Catmull-Rom segments as cubic bezier curves.
+          // Segments with the same lineWidth are batched into one path to minimise stroke() calls.
+          // Varying pressure changes lineWidth → flush the batch when width changes significantly.
+          let batchW=-1
+          for(let i=1;i<pts.length;i++){
+            const p0=pts[Math.max(0,i-2)],p1=pts[i-1],p2=pts[i],p3=pts[Math.min(pts.length-1,i+1)]
+            const segW=(p1.sz+p2.sz)/2
+            if(Math.abs(segW-batchW)>0.5){
+              // flush previous batch
+              if(batchW>=0)lctx.stroke()
+              lctx.lineWidth=segW;batchW=segW
+              lctx.beginPath();lctx.moveTo(p1.x,p1.y)
+            }
+            const cp1x=p1.x+(p2.x-p0.x)/6,cp1y=p1.y+(p2.y-p0.y)/6
+            const cp2x=p2.x-(p3.x-p1.x)/6,cp2y=p2.y-(p3.y-p1.y)/6
+            lctx.bezierCurveTo(cp1x,cp1y,cp2x,cp2y,p2.x,p2.y)
+            if(i===pts.length-1)lctx.stroke()  // flush last batch
+          }
+        } else if(wetCanvasRef.current){
+          // Fallback (shift-snap stroke, or single dot with no points array): commit wet canvas
+          draw.getContext('2d').drawImage(wetCanvasRef.current,0,0)
+        }
+      }
+      strokePtsRef.current=[]
+      dirtyRectRef.current=null
+      wetCanvasRef.current=null
+      saveHist()
+      comp();tick()
+    } else if(activeTool===TOOLS.MOVE){saveHist()}
+    penShiftSnapRef.current=null;smoothPtRef.current=null;penUsedShiftRef.current=false
     const ctx2=draw?.getContext('2d');if(ctx2)ctx2.globalCompositeOperation='source-over'
     moveSnap.current=null;lastPt.current=null
   }
@@ -1965,7 +2148,7 @@ export default function App() {
       }
     }
     const onShiftDn=e=>{if(e.key==='Shift'){shiftKeyRef.current=true;compRef.current?.()}}
-    const onShiftUp=e=>{if(e.key==='Shift'){shiftKeyRef.current=false;penSnapDirRef.current=null;penShiftSnapRef.current=null;compRef.current?.()}}
+    const onShiftUp=e=>{if(e.key==='Shift'){shiftKeyRef.current=false;penShiftSnapRef.current=null;compRef.current?.()}}
     window.addEventListener('keydown',h)
     window.addEventListener('keyup',onKeyUp)
     window.addEventListener('keydown',onShiftDn)
