@@ -3,6 +3,9 @@ import * as THREE from 'three'
 import './App.css'
 
 const TOOLS = { PEN:'pen', ERASER:'eraser', SELECT:'select', MOVE:'move', LINE:'line', RULER:'ruler', HAND:'hand', ROTATE:'rotatecanvas' }
+const ZOOM_LEVELS=[5.0,6.2,8.0,9.5,12.5,17.0,20.0,25.0,29.0,33.3,50.0,66.7,75.0,80.0,90.0,100.0,110.0,130.0,150.0,170.0,190.0,200.0,220.0,260.0,300.0,320.0,400.0,500.0,600.0,700.0,800.0,900.0]
+const snapZoomIn =v=>{const n=ZOOM_LEVELS.find(z=>z>v+0.05);return n??ZOOM_LEVELS[ZOOM_LEVELS.length-1]}
+const snapZoomOut=v=>{const n=[...ZOOM_LEVELS].reverse().find(z=>z<v-0.05);return n??ZOOM_LEVELS[0]}
 const PRESET_COLORS = ['#000000','#00cc00','#ff6600','#0066ff','#ff00ee','#ff0000']
 const DEFAULT_W = 2800, DEFAULT_H = 1050
 const PAPER_ID = 0
@@ -625,12 +628,87 @@ function RulerOverlay({w,h,rulers=[],activeRulerId=null,scale=1}){
   return <canvas ref={ref} width={w} height={h} className="ruler-overlay"/>
 }
 
+// ── ScreenCaptureSelectOverlay ─────────────────────────────────────
+function ScreenCaptureSelectOverlay({video,onConfirm,onCancel,visible}){
+  const canvasRef=useRef(null)
+  const dragRef=useRef(null)
+  const vw=video.videoWidth,vh=video.videoHeight
+  const scale=Math.min((window.innerWidth*.9)/Math.max(1,vw),(window.innerHeight*.82)/Math.max(1,vh))
+  const cw=Math.round(vw*scale),ch=Math.round(vh*scale)
+  useEffect(()=>{
+    if(!visible)return
+    let raf
+    const loop=()=>{
+      const c=canvasRef.current;if(!c){raf=requestAnimationFrame(loop);return}
+      const ctx=c.getContext('2d')
+      ctx.drawImage(video,0,0,cw,ch)
+      const d=dragRef.current
+      if(d){
+        // 青枠をキャンバス境界にクランプ
+        const rx=Math.max(0,Math.min(d.x0,d.x1))
+        const ry=Math.max(0,Math.min(d.y0,d.y1))
+        const rx2=Math.min(cw,Math.max(d.x0,d.x1))
+        const ry2=Math.min(ch,Math.max(d.y0,d.y1))
+        const rw=rx2-rx,rh=ry2-ry
+        if(rw>0&&rh>0){
+          ctx.fillStyle='rgba(0,0,0,0.45)'
+          ctx.beginPath();ctx.rect(0,0,cw,ch);ctx.rect(rx,ry,rw,rh);ctx.fill('evenodd')
+          ctx.strokeStyle='#55aaff';ctx.lineWidth=2;ctx.setLineDash([])
+          ctx.strokeRect(rx,ry,rw,rh)
+        }
+      }
+      raf=requestAnimationFrame(loop)
+    }
+    raf=requestAnimationFrame(loop)
+    return()=>cancelAnimationFrame(raf)
+  },[video,cw,ch,visible])
+  // キャンバス相対座標を返す（枠外でも計算可）
+  const getPos=e=>{
+    const c=canvasRef.current,r=c.getBoundingClientRect()
+    return{x:(e.clientX-r.left)*cw/r.width,y:(e.clientY-r.top)*ch/r.height}
+  }
+  const onPD=e=>{
+    if(e.target===e.currentTarget.querySelector('button'))return
+    e.preventDefault()
+    const p=getPos(e)
+    dragRef.current={x0:p.x,y0:p.y,x1:p.x,y1:p.y}
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+  const onPM=e=>{if(dragRef.current){const p=getPos(e);dragRef.current={...dragRef.current,x1:p.x,y1:p.y}}}
+  const onPU=e=>{
+    if(!dragRef.current)return
+    const p=getPos(e),d=dragRef.current;dragRef.current=null
+    // ビデオ座標にクランプして確定
+    const sx=Math.max(0,Math.min(d.x0,p.x,cw)/scale)
+    const sy=Math.max(0,Math.min(d.y0,p.y,ch)/scale)
+    const ex=Math.min(cw,Math.max(d.x0,p.x,0))/scale
+    const ey=Math.min(ch,Math.max(d.y0,p.y,0))/scale
+    const sw=Math.min(vw-sx,ex-sx),sh=Math.min(vh-sy,ey-sy)
+    if(sw>5&&sh>5)onConfirm({sx,sy,sw,sh})
+  }
+  if(!visible)return null
+  return(
+    <div style={{position:'fixed',inset:0,zIndex:9998,background:'rgba(0,0,0,0.88)',
+                 display:'flex',alignItems:'center',justifyContent:'center',
+                 flexDirection:'column',gap:10,cursor:'crosshair',touchAction:'none'}}
+      onPointerDown={onPD} onPointerMove={onPM} onPointerUp={onPU}>
+      <div style={{color:'#bbb',fontSize:13,pointerEvents:'none'}}>ドラッグでキャプチャ範囲を選択してください</div>
+      <canvas ref={canvasRef} width={cw} height={ch}
+        style={{display:'block',maxWidth:'90vw',maxHeight:'82vh',pointerEvents:'none'}}/>
+      <button style={{padding:'5px 16px',background:'#2a2a2a',color:'#aaa',border:'1px solid #555',borderRadius:4,cursor:'pointer',fontSize:12,pointerEvents:'auto'}}
+        onPointerDown={e=>e.stopPropagation()}
+        onClick={e=>{e.stopPropagation();onCancel()}}>キャンセル</button>
+    </div>
+  )
+}
+
 // ── SelectionStrip ─────────────────────────────────────────────────
 function SelectionStrip({sel,canvasEl,cvW,cvH,onDeselect,onDelete,onDeleteOut,onFill,onTransform}) {
   if(!sel||!canvasEl||sel.w<2||sel.h<2)return null
   const r=canvasEl.getBoundingClientRect()
-  const left=Math.max(4,r.left+sel.x*(r.width/cvW)-38)
-  const top=r.top+sel.y*(r.height/cvH)
+  const sx=r.width/cvW,sy=r.height/cvH
+  const left=Math.max(4,r.left+sel.x*sx-4)
+  const top=Math.min(window.innerHeight-44,r.top+(sel.y+sel.h)*sy+8)
   const items=[
     {icon:<DeselectIcon/>,label:'選択を解除',fn:onDeselect},
     {icon:<DeleteSelIcon/>,label:'消去',fn:onDelete},
@@ -639,7 +717,7 @@ function SelectionStrip({sel,canvasEl,cvW,cvH,onDeselect,onDelete,onDeleteOut,on
     {icon:<FillSelIcon/>,label:'塗りつぶし',fn:onFill},
   ]
   return (
-    <div className="sel-strip" style={{left,top}}>
+    <div className="sel-strip sel-strip--row" style={{left,top}}>
       {items.map((item,i)=>(
         <button key={i} className="sel-strip-btn" onClick={item.fn}>
           {item.icon}<span className="sel-strip-tip">{item.label}</span>
@@ -662,6 +740,7 @@ function TransformOverlay({xf,canvasEl,cvW,cvH,onUpdate,onCommit,onCancel}) {
     const onM=ev=>{
       const dx=(ev.clientX-sx2)/sx,dy=(ev.clientY-sy2)/sy
       if(hid==='rot'){const scx=r.left+cx*sx,scy=r.top+cy*sy;onUpdate({angle:Math.atan2(ev.clientY-scy,ev.clientX-scx)+Math.PI/2});return}
+      if(hid==='move'){onUpdate({rect:{...orig,x:orig.x+dx,y:orig.y+dy}});return}
       const nr={...orig}
       if(hid.includes('l')){nr.x=orig.x+dx;nr.w=Math.max(8,orig.w-dx)}
       if(hid.includes('r'))nr.w=Math.max(8,orig.w+dx)
@@ -674,6 +753,7 @@ function TransformOverlay({xf,canvasEl,cvW,cvH,onUpdate,onCommit,onCancel}) {
   }
   const toS=(hx,hy)=>({left:r.left+hx*sx-5,top:r.top+hy*sy-5})
   return(<>
+    <div className="xf-move-area" style={{left:r.left+rect.x*sx,top:r.top+rect.y*sy,width:rect.w*sx,height:rect.h*sy,transform:`rotate(${angle}rad)`,transformOrigin:`${(cx-rect.x)*sx}px ${(cy-rect.y)*sy}px`}} onMouseDown={e=>onHDown(e,'move')}/>
     <div className="xf-outline" style={{left:r.left+rect.x*sx,top:r.top+rect.y*sy,width:rect.w*sx,height:rect.h*sy,transform:`rotate(${angle}rad)`,transformOrigin:`${(cx-rect.x)*sx}px ${(cy-rect.y)*sy}px`}}/>
     {handles.map(([hid,hx,hy])=>{const sp=toS(hx,hy);return <div key={hid} className={`xf-handle${hid==='rot'?' xf-rot':''}`} style={{left:sp.left,top:sp.top}} onMouseDown={e=>onHDown(e,hid)}/>})}
     <div className="xf-btns" style={{left:r.left+rect.x*sx,top:r.top+(rect.y+rect.h)*sy+10}}>
@@ -686,7 +766,7 @@ function TransformOverlay({xf,canvasEl,cvW,cvH,onUpdate,onCommit,onCancel}) {
 export default function App() {
   const [activeTool,setActiveTool]     = useState(TOOLS.PEN)
   const [penColor,setPenColor]         = useState('#000000')
-  const [penSize,setPenSize]           = useState(1)
+  const [penSize,setPenSize]           = useState(3)
   const [eraserSize,setEraserSize]     = useState(20)
   const [panOffset,setPanOffset]       = useState({x:0,y:0})
   const [refImage,setRefImage]         = useState(null)
@@ -698,6 +778,7 @@ export default function App() {
   const [gridVisible,setGridVisible]   = useState(true)
   const [gridSize,setGridSize]         = useState(100)
   const [gridOpacity,setGridOpacity]   = useState(40)
+  const [gridColor,setGridColor]       = useState('#3366ff')
   const [showRuler,setShowRuler]       = useState(false)
   const [rulerType,setRulerType]       = useState('div')
   const [rulerDivisions,setRulerDivisions] = useState(8)
@@ -749,13 +830,13 @@ export default function App() {
   const [cropRect,setCropRect] = useState(null)
   const [appliedCrop,setAppliedCrop] = useState(null)
   const [photoAreaDragOver,setPhotoAreaDragOver] = useState(false)
+  const [screenCapState,setScreenCapState] = useState(null) // null | 'selecting' | 'active'
+  const [screenCapInteract,setScreenCapInteract] = useState(false)
+  const [extConnected,setExtConnected] = useState(false)
+
   const [pressureSensitivity,setPressureSensitivity] = useState(true)
   const [flipPhoto,setFlipPhoto] = useState(false)
   const [flipDraw,setFlipDraw] = useState(false)
-  const [panelOrder,setPanelOrder] = useState(['nav','tool','layer'])
-  const [sidebarLeft,setSidebarLeft] = useState(false)
-  const [panelDragSrc,setPanelDragSrc] = useState(null)
-  const [panelDropIdx,setPanelDropIdx] = useState(null)
 
   const setHardMode = v => { if(v&&activeTool!==TOOLS.PEN)setActiveTool(TOOLS.PEN); _setHardMode(v) }
 
@@ -764,6 +845,9 @@ export default function App() {
   const setSel     = v => { const val=typeof v==='function'?v(selRef.current):v; selRef.current=val; _setSel(val) }
   const xfRef      = useRef(null)
   const setXfState = v => { const val=typeof v==='function'?v(xfRef.current):v; xfRef.current=val; setXf(val) }
+  const [selMode, _setSelMode] = useState('rect')  // 'rect' | 'lasso' | 'poly'
+  const selModeRef = useRef('rect')
+  const setSelMode = v => { selModeRef.current = v; _setSelMode(v) }
 
   const cvRef          = useRef({w:DEFAULT_W,h:DEFAULT_H})
   const layerCanvases  = useRef({})
@@ -784,6 +868,11 @@ export default function App() {
   const globalPtrClientRef  = useRef({x:0,y:0})
   const navigatorRef        = useRef(null)
   const viewZoomRef         = useRef(100)
+  const canvasDivRef        = useRef(null)
+  const lastPointerRef      = useRef({x:null,y:null})
+  const activeTouchesRef    = useRef(0)
+  const prevZoomRef         = useRef(100)
+  const wheelDidCursorZoomRef = useRef(false)
   const viewRotationRef     = useRef(0)
   const nonToolSpringRef    = useRef(null)  // {key, restore} for non-tool hold actions
   const rotateStartRef      = useRef(null)  // {px, startRot} for drag-to-rotate
@@ -802,10 +891,6 @@ export default function App() {
   const [layerDragSrc, setLayerDragSrc] = useState(null)
   const [layerDropIdx, setLayerDropIdx] = useState(null)
 
-  const [toolOrder,setToolOrder]=useState(()=>{try{return JSON.parse(localStorage.getItem('tool-order')||'null')||[...TOOL_IDS]}catch{return[...TOOL_IDS]}})
-  const [toolDragSrc,setToolDragSrc]=useState(null)
-  const [toolDropIdx,setToolDropIdx]=useState(null)
-  const [editToolLayout,setEditToolLayout]=useState(false)
 
   // ── Tabmate (WebHID) ──────────────────────────────────────────
   const [showTabmatePanel,setShowTabmatePanel] = useState(false)
@@ -820,6 +905,7 @@ export default function App() {
   const tabmateActionsRef   = useRef({})
   const tabmateMappingsRef  = useRef({})
   const tabmateSpringRef    = useRef(null)   // {btnKey, from} when a Tabmate button is held in hold mode
+  const tabmateHoldRepeatRef= useRef(null)   // {btnKey, timeoutId, intervalId} for continuous repeat on held slider buttons
   const tabmateFlashTimer   = useRef(null)   // timeout id for clearing tabmateFlash
   const shortcutsRef        = useRef(shortcuts)
   const shortcutModesRef    = useRef({})
@@ -836,15 +922,30 @@ export default function App() {
   const lineStart    = useRef(null)
   const lineStartScreen = useRef(null)
   const penStrokeStart = useRef(null)
-  const selPtsRef    = useRef([])
-  const selMoveStart = useRef(null)
-  const selMoveSnap  = useRef(null)
-  const selMoveOrigR = useRef(null)
+  const selPtsRef       = useRef([])
+  const selMoveStart    = useRef(null)
+  const selMoveSnap     = useRef(null)
+  const selMoveOrigR    = useRef(null)
+  const selRectStartRef    = useRef(null)  // rect mode: drag start point
+  const selPolyInProgRef   = useRef([])   // poly mode: in-progress vertices
+  const selPolyCursorRef   = useRef(null) // poly mode: current cursor for live preview
+  const selPolyLastClickRef= useRef(0)    // poly mode: timestamp of last click for double-click detection
   const moveOrigin   = useRef(null)
   const moveSnap     = useRef(null)
   const shiftKeyRef     = useRef(false)
   const penShiftSnapRef = useRef(null)
   const smoothPtRef     = useRef(null)
+  const smoothPrRef     = useRef(1)     // EMA-smoothed pressure (0-1) for current pen stroke
+  const prevMidRef      = useRef(null)  // last drawn midpoint for quadratic-bezier curve continuity
+  const prevSzRef       = useRef(1)     // stroke width at end of previous bezier segment (for taper interpolation)
+  const screenCapVideoRef  = useRef(null)
+  const screenCapStreamRef = useRef(null)
+  const screenCapCropRef   = useRef(null)
+  const screenCapRafRef    = useRef(null)
+  const screenCapActiveRef = useRef(false)
+  const capDragRef         = useRef(null)  // {x,y,moved} for distinguish click vs drag in interact mode
+  const extIdRef           = useRef(null)  // Chrome extension ID (set by content.js postMessage)
+  const extTargetTabRef    = useRef(null)  // target tab ID for interaction forwarding
   const wetCanvasRef    = useRef(null)   // temporary canvas for in-progress pen stroke
   const frameBufferRef  = useRef(null)   // cached composite snapshot (pre-stroke) for fast path
   const dirtyRectRef    = useRef(null)   // ① dirty rect: bounding box of pixels changed since last comp()
@@ -853,13 +954,13 @@ export default function App() {
   const springToolRef   = useRef(null)
   const flipPhotoRef    = useRef(false)
   const flipDrawRef     = useRef(false)
-  const panelDragRef    = useRef({idx:null,dropIdx:null,startY:0,moved:false})
 
   flipPhotoRef.current = flipPhoto
   flipDrawRef.current = flipDraw
+  screenCapActiveRef.current = screenCapState === 'active'
 
   const S = useRef({})
-  S.current = {activeTool,penColor,penSize,eraserSize,activeLayerId,refOpacity,layers,showGrid,gridVisible,gridSize,gridOpacity,practiceMode,practiceDrawMode,practiceStyle,practiceObject,rulerType,rulerDivisions,rulerColor,hardMode,practiceOrbit,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity,pressureSensitivity}
+  S.current = {activeTool,penColor,penSize,eraserSize,activeLayerId,refOpacity,layers,showGrid,gridVisible,gridSize,gridOpacity,gridColor,practiceMode,practiceDrawMode,practiceStyle,practiceObject,rulerType,rulerDivisions,rulerColor,hardMode,practiceOrbit,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity,pressureSensitivity}
   viewZoomRef.current = viewZoom
   viewRotationRef.current = viewRotation
   dispSizeRef.current = dispSize
@@ -880,8 +981,10 @@ export default function App() {
         const c=document.createElement('canvas');c.width=w;c.height=h
         if(l.isPaper){const cx=c.getContext('2d');cx.fillStyle='#ffffff';cx.fillRect(0,0,w,h)}
         layerCanvases.current[l.id]=c
-        const key=String(l.id),blank=c.getContext('2d').getImageData(0,0,w,h)
-        histStacks.current[key]=[blank];histPtrs.current[key]=0
+        const key=String(l.id)
+        const blankC=document.createElement('canvas');blankC.width=w;blankC.height=h
+        blankC.getContext('2d').drawImage(c,0,0)
+        histStacks.current[key]=[blankC];histPtrs.current[key]=0
       }
     })
     Object.keys(layerCanvases.current).forEach(id=>{if(!layers.find(l=>l.id===+id))delete layerCanvases.current[id]})
@@ -910,14 +1013,17 @@ export default function App() {
         c.width=nw;c.height=nh
         const ctx=c.getContext('2d')
         if(+id===PAPER_ID){ctx.fillStyle='#fff';ctx.fillRect(0,0,nw,nh)}
-        const blank=ctx.getImageData(0,0,nw,nh)
-        histStacks.current[String(id)]=[blank];histPtrs.current[String(id)]=0
+        const blankC=document.createElement('canvas');blankC.width=nw;blankC.height=nh
+        blankC.getContext('2d').drawImage(c,0,0)
+        histStacks.current[String(id)]=[blankC];histPtrs.current[String(id)]=0
       })
       if(!photoLayerCanvas.current)photoLayerCanvas.current=document.createElement('canvas')
       const plc=photoLayerCanvas.current;plc.width=nw;plc.height=nh
       const pctx=plc.getContext('2d');pctx.clearRect(0,0,nw,nh)
       pctx.drawImage(img,0,0,nw/2,nh)
-      histStacks.current[PHOTO_ID]=[pctx.getImageData(0,0,nw,nh)];histPtrs.current[PHOTO_ID]=0
+      const photoSnap=document.createElement('canvas');photoSnap.width=nw;photoSnap.height=nh
+      photoSnap.getContext('2d').drawImage(plc,0,0)
+      histStacks.current[PHOTO_ID]=[photoSnap];histPtrs.current[PHOTO_ID]=0
       lastHistKey.current=null
       setAppliedCrop(null);setCropMode(false);setCropRect(null)
       setRev(r=>r+1)
@@ -955,12 +1061,15 @@ export default function App() {
     const key=String(S.current.activeLayerId)
     const canvas=S.current.activeLayerId===PHOTO_ID?photoLayerCanvas.current:layerCanvases.current[S.current.activeLayerId];if(!canvas)return
     const {w:cw,h:ch}=cvRef.current
-    const data=canvas.getContext('2d').getImageData(0,0,cw,ch)
+    const clone=document.createElement('canvas');clone.width=cw;clone.height=ch
+    clone.getContext('2d').drawImage(canvas,0,0)
     const stack=histStacks.current[key]??[]
     if(!histStacks.current[key]){histStacks.current[key]=stack;histPtrs.current[key]=-1}
     const ptr=histPtrs.current[key]??-1
-    stack.splice(ptr+1);stack.push(data)
-    if(stack.length>MAX_HIST)stack.shift()
+    // Release GPU backing of dropped redo entries immediately (don't wait for GC)
+    stack.splice(ptr+1).forEach(c=>{c.width=1;c.height=1})
+    stack.push(clone)
+    if(stack.length>MAX_HIST){const old=stack.shift();old.width=1;old.height=1}
     histPtrs.current[key]=stack.length-1
     lastHistKey.current=key
   },[])
@@ -992,40 +1101,27 @@ export default function App() {
       }
     }
 
-    // High-quality async downscale via createImageBitmap (Lanczos3 in Chromium)
-    // Generation counter ensures stale async results are discarded
-    const gen=++navGenRef.current
-    createImageBitmap(disp,{resizeWidth:nw,resizeHeight:nh,resizeQuality:'high'})
-      .then(bitmap=>{
-        if(navGenRef.current!==gen){bitmap.close();return}
-        nc.clearRect(0,0,nw,nh)
-        nc.drawImage(bitmap,0,0)
-        bitmap.close()
-        drawRect()
-      })
-      .catch(()=>{
-        // Fallback: multi-step sync downscale for browsers lacking resize options
-        if(navGenRef.current!==gen)return
-        nc.clearRect(0,0,nw,nh)
-        let src=disp,sw=disp.width,sh=disp.height,step=0
-        while(sw>nw*2||sh>nh*2){
-          const tw=Math.ceil(sw/2),th=Math.ceil(sh/2)
-          const prev=navIntermRef.current[step]
-          if(!prev||prev.width!==tw||prev.height!==th){
-            try{navIntermRef.current[step]=new OffscreenCanvas(tw,th)}
-            catch{const c=document.createElement('canvas');c.width=tw;c.height=th;navIntermRef.current[step]=c}
-          }
-          const interm=navIntermRef.current[step]
-          const tc=interm.getContext('2d')
-          tc.clearRect(0,0,tw,th)
-          tc.imageSmoothingEnabled=true;tc.imageSmoothingQuality='high'
-          tc.drawImage(src,0,0,tw,th)
-          src=interm;sw=tw;sh=th;step++
-        }
-        nc.imageSmoothingEnabled=true;nc.imageSmoothingQuality='high'
-        nc.drawImage(src,0,0,nw,nh)
-        drawRect()
-      })
+    // GPU→GPU multi-step downscale: halve repeatedly until close to target size.
+    // No createImageBitmap → no GPU→CPU readback → no main-thread stall.
+    nc.clearRect(0,0,nw,nh)
+    let src=disp,sw=disp.width,sh=disp.height,step=0
+    while(sw>nw*2||sh>nh*2){
+      const tw=Math.ceil(sw/2),th=Math.ceil(sh/2)
+      const prev=navIntermRef.current[step]
+      if(!prev||prev.width!==tw||prev.height!==th){
+        try{navIntermRef.current[step]=new OffscreenCanvas(tw,th)}
+        catch{const c=document.createElement('canvas');c.width=tw;c.height=th;navIntermRef.current[step]=c}
+      }
+      const interm=navIntermRef.current[step]
+      const tc=interm.getContext('2d')
+      tc.clearRect(0,0,tw,th)
+      tc.imageSmoothingEnabled=true;tc.imageSmoothingQuality='high'
+      tc.drawImage(src,0,0,tw,th)
+      src=interm;sw=tw;sh=th;step++
+    }
+    nc.imageSmoothingEnabled=true;nc.imageSmoothingQuality='high'
+    nc.drawImage(src,0,0,nw,nh)
+    drawRect()
   },[])
   const navUpdateRef=useRef(navUpdate)
   navUpdateRef.current=navUpdate
@@ -1079,7 +1175,7 @@ export default function App() {
     const ctx=disp.getContext('2d')
     ctx.clearRect(0,0,cw,ch)
     ctx.fillStyle='#fff';ctx.fillRect(0,0,cw,ch)
-    const {practiceMode,practiceStyle,practiceObject,refOpacity,layers,showGrid,gridVisible,gridSize,gridOpacity,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity}=S.current
+    const {practiceMode,practiceStyle,practiceObject,refOpacity,layers,showGrid,gridVisible,gridSize,gridOpacity,gridColor,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity}=S.current
     // Left half: photo or practice
     const _flipL=flipPhotoRef.current
     if(_flipL){ctx.save();ctx.beginPath();ctx.rect(0,0,cw/2,ch);ctx.clip();ctx.translate(cw/4,0);ctx.scale(-1,1);ctx.translate(-cw/4,0)}
@@ -1096,7 +1192,7 @@ export default function App() {
         ctx.strokeStyle='rgba(100,96,90,0.35)';ctx.lineWidth=1.5;ctx.setLineDash([]);ctx.stroke()
         drawCompound(ctx,practiceObject,cw/4,_cy,_sc,practiceStyle)
       }
-    } else if(photoLayerCanvas.current&&refImageEl.current){
+    } else if(photoLayerCanvas.current&&(refImageEl.current||screenCapActiveRef.current)){
       ctx.globalAlpha=refOpacity/100
       ctx.drawImage(photoLayerCanvas.current,0,0)
       ctx.globalAlpha=1
@@ -1154,7 +1250,7 @@ export default function App() {
     }
     // Grid — drawn independently for each half
     if(showGrid&&gridVisible){
-      ctx.globalAlpha=gridOpacity/100;ctx.strokeStyle='#3366ff';ctx.setLineDash([])
+      ctx.globalAlpha=gridOpacity/100;ctx.strokeStyle=gridColor;ctx.setLineDash([])
       const drawHalfGrid=(x0,hw)=>{
         ctx.save();ctx.beginPath();ctx.rect(x0,0,hw,ch);ctx.clip()
         if(gridSize<0){
@@ -1183,6 +1279,19 @@ export default function App() {
       ctx.drawImage(content,(or||rect).x,(or||rect).y,(or||rect).w,(or||rect).h,-rect.w/2,-rect.h/2,rect.w,rect.h)
       ctx.restore()
     } else if(selRef.current){drawSelPath(ctx,selRef.current)}
+    // Poly-mode in-progress preview (vertices not yet closed)
+    const polyPts=selPolyInProgRef.current
+    if(polyPts.length>0&&selModeRef.current==='poly'){
+      ctx.save()
+      ctx.strokeStyle='#3399ff';ctx.lineWidth=1;ctx.setLineDash([6,3])
+      ctx.beginPath();polyPts.forEach((p,i)=>i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y))
+      if(selPolyCursorRef.current)ctx.lineTo(selPolyCursorRef.current.x,selPolyCursorRef.current.y)
+      ctx.stroke();ctx.setLineDash([])
+      // First vertex dot — click target to close
+      ctx.fillStyle='#3399ff';ctx.strokeStyle='#fff';ctx.lineWidth=1.5
+      ctx.beginPath();ctx.arc(polyPts[0].x,polyPts[0].y,5,0,Math.PI*2);ctx.fill();ctx.stroke()
+      ctx.restore()
+    }
     // Pen/eraser shift guide: + and ×
     if(isDrawing.current&&shiftKeyRef.current&&penStrokeStart.current){
       const {activeTool:at}=S.current
@@ -1222,15 +1331,193 @@ export default function App() {
     }
   },[cvW,cvH,navUpdate,dispSize])
 
-  useEffect(()=>{comp()},[comp,showGrid,gridVisible,gridSize,gridOpacity])
+  useEffect(()=>{comp()},[comp,showGrid,gridVisible,gridSize,gridOpacity,gridColor])
   useEffect(()=>{comp()},[comp,refOpacity])
   useEffect(()=>{comp()},[comp,layers])
   useEffect(()=>{comp()},[comp,practiceStyle,practiceMode,practiceObject,practiceCategory,flatStyle,refOverlay,refOverlayOpacity,practiceOverlay,practiceOverlayOpacity])
   useEffect(()=>{comp()},[comp,flipPhoto,flipDraw])
+
+  const stopScreenCapture=useCallback(()=>{
+    if(screenCapRafRef.current){cancelAnimationFrame(screenCapRafRef.current);screenCapRafRef.current=null}
+    screenCapStreamRef.current?.getTracks().forEach(t=>t.stop())
+    screenCapVideoRef.current=null;screenCapStreamRef.current=null;screenCapCropRef.current=null
+    screenCapActiveRef.current=false
+    setScreenCapState(null)
+    // Reset canvas to default dimensions
+    const nw=DEFAULT_W,nh=DEFAULT_H
+    setCvW(nw);setCvH(nh);cvRef.current={w:nw,h:nh}
+    setViewZoom(100);viewZoomRef.current=100
+    setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}
+    Object.entries(layerCanvases.current).forEach(([id,c])=>{
+      c.width=nw;c.height=nh
+      const ctx=c.getContext('2d');ctx.clearRect(0,0,nw,nh)
+      if(+id===PAPER_ID){ctx.fillStyle='#fff';ctx.fillRect(0,0,nw,nh)}
+      const blankC=document.createElement('canvas');blankC.width=nw;blankC.height=nh
+      blankC.getContext('2d').drawImage(c,0,0)
+      histStacks.current[String(id)]=[blankC];histPtrs.current[String(id)]=0
+    })
+    if(photoLayerCanvas.current){photoLayerCanvas.current.width=1;photoLayerCanvas.current=null}
+    lastHistKey.current=null;setRev(r=>r+1)
+    comp()
+  },[comp,setCvW,setCvH,setViewZoom,setPanOffset])
+
+  const confirmScreenCapCrop=useCallback(crop=>{
+    screenCapCropRef.current=crop
+    // Resize canvas to match crop aspect ratio (same logic as photo load)
+    const capAR=crop.sw/crop.sh
+    let nw=DEFAULT_W,nh=Math.max(1,Math.round(DEFAULT_W/2/capAR))
+    const maxArea=DEFAULT_W*DEFAULT_H
+    if(nw*nh>maxArea){const sc=Math.sqrt(maxArea/(nw*nh));nw=Math.floor(Math.round(nw*sc)/2)*2;nh=Math.max(1,Math.round(nh*sc))}
+    setCvW(nw);setCvH(nh);cvRef.current={w:nw,h:nh}
+    setViewZoom(100);viewZoomRef.current=100
+    setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}
+    Object.entries(layerCanvases.current).forEach(([id,c])=>{
+      c.width=nw;c.height=nh
+      const ctx=c.getContext('2d')
+      if(+id===PAPER_ID){ctx.fillStyle='#fff';ctx.fillRect(0,0,nw,nh)}
+      const blankC=document.createElement('canvas');blankC.width=nw;blankC.height=nh
+      blankC.getContext('2d').drawImage(c,0,0)
+      histStacks.current[String(id)]=[blankC];histPtrs.current[String(id)]=0
+    })
+    if(!photoLayerCanvas.current)photoLayerCanvas.current=document.createElement('canvas')
+    photoLayerCanvas.current.width=nw;photoLayerCanvas.current.height=nh
+    setScreenCapInteract(false)
+    window.focus()
+    setScreenCapState('active')
+  },[setCvW,setCvH,setViewZoom,setPanOffset])
+
+  const startScreenCapture=useCallback(async()=>{
+    try{
+      const stream=await navigator.mediaDevices.getDisplayMedia({video:{cursor:'always'},audio:false})
+      window.focus()  // reclaim focus — Chrome may have focused the captured tab during picker
+      screenCapStreamRef.current=stream
+      const video=document.createElement('video')
+      video.srcObject=stream;video.autoplay=true;video.muted=true;video.playsInline=true
+      await new Promise(res=>{video.onloadedmetadata=res})
+      await video.play()
+      screenCapVideoRef.current=video
+      stream.getVideoTracks()[0]?.addEventListener('ended',()=>stopScreenCapture())
+      // 拡張機能が入っていれば最後にアクティブだったタブ(=キャプチャ対象)を取得
+      if(extIdRef.current){
+        try{
+          chrome.runtime.sendMessage(extIdRef.current,{action:'getTargetTabId'},res=>{
+            if(res?.tabId)extTargetTabRef.current=res.tabId
+          })
+        }catch(_){}
+      }
+      setScreenCapState('selecting')
+    }catch(e){
+      if(e.name!=='NotAllowedError')console.error('getDisplayMedia failed:',e)
+    }
+  },[comp,stopScreenCapture])
+
+  // Capture area interact mode — unified handlers for both popup and no-popup cases
+  // Drag → pan crop (move which part of captured content is visible)
+  // Short tap (no drag) → forward click to popup (popup mode only)
+  // Wheel → zoom crop (resize crop region; smaller = zoom in, larger = zoom out)
+  const onCapInteractDown=useCallback(e=>{
+    e.preventDefault();e.stopPropagation()
+    capDragRef.current={x:e.clientX,y:e.clientY,moved:false}
+    e.currentTarget.setPointerCapture(e.pointerId)
+  },[])
+  const onCapInteractMove=useCallback(e=>{
+    const d=capDragRef.current;if(!d)return
+    const dx=e.clientX-d.x,dy=e.clientY-d.y
+    if(!d.moved&&(Math.abs(dx)>4||Math.abs(dy)>4))d.moved=true
+    if(!d.moved)return
+    const crop=screenCapCropRef.current,video=screenCapVideoRef.current;if(!crop||!video)return
+    const ds=dispSizeRef.current
+    screenCapCropRef.current={
+      ...crop,
+      sx:Math.max(0,Math.min(video.videoWidth-crop.sw, crop.sx-dx*crop.sw/(ds.w/2))),
+      sy:Math.max(0,Math.min(video.videoHeight-crop.sh,crop.sy-dy*crop.sh/ds.h))
+    }
+    d.x=e.clientX;d.y=e.clientY
+  },[])
+  const onCapInteractUp=useCallback(e=>{
+    const d=capDragRef.current;capDragRef.current=null
+    if(!d||d.moved)return
+    // 短いタップ → 拡張機能経由でクリックを転送
+    const extId=extIdRef.current,tabId=extTargetTabRef.current
+    if(!extId||!tabId)return
+    const crop=screenCapCropRef.current;if(!crop)return
+    const rect=e.currentTarget.getBoundingClientRect()
+    const dpr=window.devicePixelRatio||1
+    const docX=Math.round((crop.sx+(e.clientX-rect.left)/rect.width *crop.sw)/dpr)
+    const docY=Math.round((crop.sy+(e.clientY-rect.top) /rect.height*crop.sh)/dpr)
+    try{chrome.runtime.sendMessage(extId,{action:'forwardInteraction',type:'click',tabId,x:docX,y:docY})}catch(_){}
+  },[])
+  const onCapInteractCancel=useCallback(()=>{capDragRef.current=null},[])
+  const onCapInteractZoom=useCallback(e=>{
+    e.preventDefault()
+    const crop=screenCapCropRef.current,video=screenCapVideoRef.current;if(!crop||!video)return
+    const rect=e.currentTarget.getBoundingClientRect()
+    const rx=(e.clientX-rect.left)/rect.width
+    const ry=(e.clientY-rect.top)/rect.height
+
+    const extId=extIdRef.current,tabId=extTargetTabRef.current
+    if(!e.ctrlKey&&extId&&tabId){
+      // 通常ホイール + 拡張あり → スクロールを対象タブに転送
+      const dpr=window.devicePixelRatio||1
+      const docX=Math.round((crop.sx+rx*crop.sw)/dpr)
+      const docY=Math.round((crop.sy+ry*crop.sh)/dpr)
+      try{chrome.runtime.sendMessage(extId,{action:'forwardInteraction',type:'wheel',tabId,x:docX,y:docY,deltaX:e.deltaX,deltaY:e.deltaY})}catch(_){}
+      return
+    }
+    // Ctrl+ホイール または 拡張なし → キャプチャ範囲をズーム
+    const px=crop.sx+rx*crop.sw
+    const py=crop.sy+ry*crop.sh
+    const factor=Math.pow(1.001,e.deltaY)
+    const nw=Math.max(50,Math.min(video.videoWidth, crop.sw*factor))
+    const nh=Math.max(50,Math.min(video.videoHeight,crop.sh*factor))
+    screenCapCropRef.current={
+      ...crop,
+      sx:Math.max(0,Math.min(video.videoWidth-nw,  px-rx*nw)),
+      sy:Math.max(0,Math.min(video.videoHeight-nh, py-ry*nh)),
+      sw:nw,sh:nh
+    }
+  },[])
+
+  // Chrome拡張機能との接続: content.js が postMessage で拡張IDを送ってくる
+  useEffect(()=>{
+    const handler=e=>{
+      if(e.data?.type==='formtrace-ext-ready'&&e.data.extId){
+        extIdRef.current=e.data.extId
+        setExtConnected(true)
+        // content.js のループを止めるため確認を返す
+        window.postMessage({type:'formtrace-ext-ack'},'*')
+      }
+    }
+    window.addEventListener('message',handler)
+    return()=>window.removeEventListener('message',handler)
+  },[])
+
+  // rAF loop: draw live video crop to photoLayerCanvas when capture is active
+  useEffect(()=>{
+    if(screenCapState!=='active')return
+    const loop=()=>{
+      const video=screenCapVideoRef.current,crop=screenCapCropRef.current,plc=photoLayerCanvas.current
+      if(video&&crop&&plc){
+        const{w:cw,h:ch}=cvRef.current
+        const ctx=plc.getContext('2d')
+        ctx.clearRect(0,0,cw/2,ch)
+        ctx.drawImage(video,crop.sx,crop.sy,crop.sw,crop.sh,0,0,cw/2,ch)
+        comp()
+      }
+      screenCapRafRef.current=requestAnimationFrame(loop)
+    }
+    screenCapRafRef.current=requestAnimationFrame(loop)
+    return()=>{if(screenCapRafRef.current){cancelAnimationFrame(screenCapRafRef.current);screenCapRafRef.current=null}}
+  },[screenCapState,comp])
+
+
   useEffect(()=>{
     if(activeTool!==TOOLS.RULER&&placingRulerIdRef.current){
       setRulers(rs=>rs.filter(r=>r.id!==placingRulerIdRef.current))
       placingRulerIdRef.current=null;placingRulerStartRef.current=null
+    }
+    if(activeTool!==TOOLS.SELECT){
+      selPolyInProgRef.current=[];selPolyCursorRef.current=null
     }
   },[activeTool])
   const prevCvRef=useRef({w:DEFAULT_W,h:DEFAULT_H})
@@ -1255,39 +1542,85 @@ export default function App() {
           return
         }
       }
-      // カーソル位置を中心にズーム
+      // タッチ中=トラックパッドのジェスチャー、タッチなし=マウス/片手デバイス
+      const isMouseWheel=activeTouchesRef.current===0
+      // カーソル位置: wheelイベント自体のclientX/Yが正確（トラックパッド・マウス両対応）
       const rect=el.getBoundingClientRect()
       const mx=e.clientX-rect.left-rect.width/2
       const my=e.clientY-rect.top-rect.height/2
       const curZ=viewZoomRef.current/100
       const dy=Math.sign(e.deltaY)*Math.min(Math.abs(e.deltaY),100)
-      const newZRounded=Math.round(Math.min(400,Math.max(20,curZ*Math.pow(0.999,dy)*100)))
+      let newZRounded=Math.min(900,Math.max(5,Math.round(curZ*Math.pow(0.9985,dy)*1000)/10))
+      // マウス/片手デバイスのみ95〜100で100%スナップ（100%では固定しない）
+      const cur=viewZoomRef.current
+      if(isMouseWheel&&cur!==100){
+        if(cur<95&&newZRounded>=95)newZRounded=100
+        else if(cur>110&&newZRounded<=110)newZRounded=100
+      }
       const newZ=newZRounded/100
       const cx=(mx-panOffsetRef.current.x)/curZ
       const cy=(my-panOffsetRef.current.y)/curZ
       const npx=mx-cx*newZ,npy=my-cy*newZ
+      // DOM直接更新で視覚ラグをゼロに
+      if(canvasDivRef.current){
+        canvasDivRef.current.style.transform=`translate(${npx}px,${npy}px) scale(${newZ}) rotate(${viewRotationRef.current}deg)`
+      }
       panOffsetRef.current={x:npx,y:npy};setPanOffset({x:npx,y:npy})
-      setViewZoom(newZRounded)
+      viewZoomRef.current=newZRounded;wheelDidCursorZoomRef.current=true;setViewZoom(newZRounded)
     }
     const onMouseDown=e=>{
       if(e.button===1){e.preventDefault();setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}
     }
+    const onMouseMove=e=>{lastPointerRef.current={x:e.clientX,y:e.clientY}}
+    // 指が触れているかでトラックパッド/マウスを識別
+    const onPtrDown=e=>{if(e.pointerType==='touch')activeTouchesRef.current++}
+    const onPtrUp  =e=>{if(e.pointerType==='touch')activeTouchesRef.current=Math.max(0,activeTouchesRef.current-1)}
     el.addEventListener('wheel',onWheel,{passive:false})
     el.addEventListener('mousedown',onMouseDown)
-    return()=>{el.removeEventListener('wheel',onWheel);el.removeEventListener('mousedown',onMouseDown)}
+    window.addEventListener('mousemove',onMouseMove)
+    window.addEventListener('pointerdown',onPtrDown)
+    window.addEventListener('pointerup',onPtrUp)
+    window.addEventListener('pointercancel',onPtrUp)
+    return()=>{
+      el.removeEventListener('wheel',onWheel)
+      el.removeEventListener('mousedown',onMouseDown)
+      window.removeEventListener('mousemove',onMouseMove)
+      window.removeEventListener('pointerdown',onPtrDown)
+      window.removeEventListener('pointerup',onPtrUp)
+      window.removeEventListener('pointercancel',onPtrUp)
+    }
   },[])
 
   useEffect(()=>{
     const nav=navigatorRef.current;if(!nav)return
     const onWheel=e=>{
       e.preventDefault()
-      const curZ=viewZoomRef.current/100
       const dy=Math.sign(e.deltaY)*Math.min(Math.abs(e.deltaY),100)
-      setViewZoom(Math.round(Math.min(400,Math.max(20,curZ*Math.pow(0.999,dy)*100))))
+      setViewZoom(Math.min(900,Math.max(5,Math.round(viewZoomRef.current*Math.pow(0.9985,dy)*10)/10)))
     }
     nav.addEventListener('wheel',onWheel,{passive:false})
     return()=>nav.removeEventListener('wheel',onWheel)
   },[])
+
+  // 片手デバイス等のホイール以外の拡大検知→カーソル基準補正
+  useEffect(()=>{
+    if(wheelDidCursorZoomRef.current){wheelDidCursorZoomRef.current=false;prevZoomRef.current=viewZoom;return}
+    const prevZ=prevZoomRef.current
+    prevZoomRef.current=viewZoom
+    if(prevZ===viewZoom||prevZ<=0||lastPointerRef.current.x===null)return
+    const el=drawAreaRef.current;if(!el||!canvasDivRef.current)return
+    const rect=el.getBoundingClientRect()
+    if(rect.width<=0)return
+    const pf=prevZ/100,nf=viewZoom/100
+    const mx=lastPointerRef.current.x-rect.left-rect.width/2
+    const my=lastPointerRef.current.y-rect.top-rect.height/2
+    const cx=(mx-panOffsetRef.current.x)/pf
+    const cy=(my-panOffsetRef.current.y)/pf
+    const npx=mx-cx*nf,npy=my-cy*nf
+    if(!isFinite(npx)||!isFinite(npy))return
+    canvasDivRef.current.style.transform=`translate(${npx}px,${npy}px) scale(${nf}) rotate(${viewRotationRef.current}deg)`
+    panOffsetRef.current={x:npx,y:npy};setPanOffset({x:npx,y:npy})
+  },[viewZoom])
 
   // ── Three.js scene ────────────────────────────────────────────
   useEffect(()=>{
@@ -1361,41 +1694,6 @@ export default function App() {
   const tick=useCallback(()=>setRev(r=>r+1),[])
 
   const MOVE_SHIFT_STEP=8
-  const toolDragRef=useRef({idx:null,dropIdx:null,startX:0,moved:false})
-  const onToolGrab=useCallback((srcIdx,e)=>{
-    e.preventDefault();e.stopPropagation()
-    toolDragRef.current={idx:srcIdx,dropIdx:srcIdx,startX:e.clientX,moved:false}
-    setToolDragSrc(srcIdx)
-    const onMove=ev=>{
-      if(Math.abs(ev.clientX-toolDragRef.current.startX)>4)toolDragRef.current.moved=true
-      const el=document.querySelector('.toolbar-tools');if(!el)return
-      const items=[...el.querySelectorAll('.tool-drag-item')]
-      let drop=items.length
-      for(let i=0;i<items.length;i++){
-        const r=items[i].getBoundingClientRect()
-        if(ev.clientX<r.left+r.width/2){drop=i;break}
-      }
-      toolDragRef.current.dropIdx=drop;setToolDropIdx(drop)
-    }
-    const onUp=()=>{
-      const{idx:src,dropIdx:dst,moved}=toolDragRef.current
-      toolDragRef.current={idx:null,dropIdx:null,startX:0,moved:false}
-      setToolDragSrc(null);setToolDropIdx(null)
-      if(moved&&src!==null&&dst!==null&&src!==dst){
-        setToolOrder(prev=>{
-          const next=[...prev]
-          const[item]=next.splice(src,1)
-          next.splice(dst>src?dst-1:dst,0,item)
-          localStorage.setItem('tool-order',JSON.stringify(next))
-          return next
-        })
-      }
-      window.removeEventListener('pointermove',onMove)
-      window.removeEventListener('pointerup',onUp)
-    }
-    window.addEventListener('pointermove',onMove)
-    window.addEventListener('pointerup',onUp)
-  },[])
 
   // ── Navigator pointer handlers ─────────────────────────────────
   const navApply=e=>{
@@ -1500,6 +1798,7 @@ export default function App() {
     }
     if(activeTool===TOOLS.SELECT){
       const sel=selRef.current
+      const mode=selModeRef.current
       if(sel&&inRect(pt,sel)){
         isDrawing.current=true;selMoveStart.current=pt;selMoveOrigR.current={...sel}
         if(draw){
@@ -1508,20 +1807,47 @@ export default function App() {
           snap.getContext('2d').drawImage(draw,0,0);selMoveSnap.current=snap
           const ctx=draw.getContext('2d');ctx.save();applySelClip(ctx,sel);ctx.clearRect(0,0,cw,ch);ctx.restore();comp()
         }
-      } else {isDrawing.current=true;selPtsRef.current=[pt];setSel(null);comp()}
+      } else if(mode==='poly'){
+        const now=Date.now()
+        if(now-selPolyLastClickRef.current<350){
+          // Double-click: cancel polyline
+          selPolyInProgRef.current=[];selPolyCursorRef.current=null;selPolyLastClickRef.current=0;comp()
+          return
+        }
+        selPolyLastClickRef.current=now
+        const polyPts=selPolyInProgRef.current
+        if(polyPts.length>=2){
+          // Check if clicking near first vertex to close
+          const dx=pt.x-polyPts[0].x,dy=pt.y-polyPts[0].y
+          if(dx*dx+dy*dy<20*20){
+            // Close polygon
+            const pts=[...polyPts,polyPts[0]]
+            const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y)
+            const x=Math.min(...xs),y=Math.min(...ys),w=Math.max(...xs)-x,h=Math.max(...ys)-y
+            setSel({pts,x,y,w,h});selPolyInProgRef.current=[];selPolyCursorRef.current=null;selPolyLastClickRef.current=0;comp()
+            return
+          }
+        }
+        selPolyInProgRef.current=[...polyPts,pt];setSel(null);comp()
+      } else {
+        // rect or lasso: start drag
+        isDrawing.current=true
+        if(mode==='rect'){selRectStartRef.current=pt}
+        else{selPtsRef.current=[pt]}
+        setSel(null);comp()
+      }
       return
     }
     isDrawing.current=true;lastPt.current=pt
     if(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER){
       const ctx=draw?.getContext('2d');if(!ctx)return
-      // saveHist() は onPointerUp のみで呼ぶ。
-      // ここで getImageData(2800×1050) を呼ぶと GPU→CPU 同期読み取り(~10-50ms)が発生し
-      // 最初の rAF フレームが遅延して描き始めがかくつく原因になる。
-      // onPointerDown時点の状態は直前の onPointerUp が既に保存済みのため重複でもある。
+      // saveHist() は onPointerUp のみで呼ぶ（onPointerDown時点は直前のUpで保存済み）。
       penStrokeStart.current=pt
       smoothPtRef.current={x:pt.x,y:pt.y}
-      const pr=(S.current.pressureSensitivity&&e.pointerType==='pen')?Math.max(0.05,e.pressure):1
+      const pr=(S.current.pressureSensitivity&&e.pointerType==='pen')?Math.pow(Math.max(0.01,e.pressure),1.2):1
+      smoothPrRef.current=pr
       const sz=Math.max(1,activeSize*pr)
+      prevSzRef.current=sz
       const {w:_cw,h:_ch}=cvRef.current
       if(activeTool===TOOLS.PEN){
         // ③ Wet canvas: pen strokes are drawn here during stroke, committed to layer on pointerUp
@@ -1534,7 +1860,7 @@ export default function App() {
         const wctx=wetCanvasRef.current.getContext('2d')
         wctx.fillStyle=penColor
         wctx.beginPath();wctx.arc(pt.x,pt.y,sz/2,0,Math.PI*2);wctx.fill()
-        // ② Vector path: init with the first dot's position and size
+        prevMidRef.current={x:pt.x,y:pt.y}
         strokePtsRef.current=[{x:pt.x,y:pt.y,sz}];penUsedShiftRef.current=false
         // ① Initial dirty rect: bounding box of the starting dot (with 2px antialiasing margin)
         const _dm=sz/2+2
@@ -1638,6 +1964,10 @@ export default function App() {
         ?applySnap(pt0,{angleSnap:true,lineFrom:placingRulerStartRef.current}):pt0
       setRulers(rs=>rs.map(r=>r.id===pid?{...r,x2:rsnap.x,y2:rsnap.y}:r));return
     }
+    // Poly-mode cursor preview (runs outside isDrawing gate)
+    if(S.current.activeTool===TOOLS.SELECT&&selModeRef.current==='poly'&&selPolyInProgRef.current.length>0){
+      selPolyCursorRef.current=toPt(e,_bcr);comp()
+    }
     if(!isDrawing.current)return
     const pt=toPt(e,_bcr)
     const {activeTool,penColor,penSize,eraserSize}=S.current
@@ -1662,7 +1992,13 @@ export default function App() {
         const ns=orig.pts?{...orig,x:orig.x+dx,y:orig.y+dy,pts:orig.pts.map(p=>({x:p.x+dx,y:p.y+dy}))}:{...orig,x:orig.x+dx,y:orig.y+dy}
         setSel(ns);comp();return
       }
-      if(selPtsRef.current.length>0){
+      const mode=selModeRef.current
+      if(mode==='rect'&&selRectStartRef.current){
+        const st=selRectStartRef.current
+        const x=Math.min(st.x,pt.x),y=Math.min(st.y,pt.y)
+        const w=Math.abs(pt.x-st.x),h=Math.abs(pt.y-st.y)
+        setSel({x,y,w,h});comp()
+      } else if(selPtsRef.current.length>0){
         selPtsRef.current=[...selPtsRef.current,pt]
         const pts=selPtsRef.current,xs=pts.map(p=>p.x),ys=pts.map(p=>p.y)
         const x=Math.min(...xs),y=Math.min(...ys),w=Math.max(...xs)-x,h=Math.max(...ys)-y
@@ -1675,7 +2011,7 @@ export default function App() {
       const isPen=activeTool===TOOLS.PEN
       if(e.shiftKey&&penStrokeStart.current&&penShiftSnapRef.current){
         // Shift-snap mode: use last pointer position to draw a snapped line
-        const pr=(S.current.pressureSensitivity&&e.pointerType==='pen')?Math.max(0.05,e.pressure):1
+        const pr=(S.current.pressureSensitivity&&e.pointerType==='pen')?Math.pow(Math.max(0.01,e.pressure),1.2):1
         const sz=Math.max(1,activeSize*pr)
         const prev=smoothPtRef.current??pt
         const spt={x:0.4*pt.x+0.6*prev.x,y:0.4*pt.y+0.6*prev.y}
@@ -1713,24 +2049,43 @@ export default function App() {
         let drx0=Infinity,dry0=Infinity,drx1=-Infinity,dry1=-Infinity
         for(const ce of evts){
           const cpt=toPt(ce,_bcr)
-          const pr=(S.current.pressureSensitivity&&ce.pointerType==='pen')?Math.max(0.05,ce.pressure):1
+          // Pressure: power curve γ=1.2 + mild EMA α=0.7 (fast response, suppresses sensor jitter)
+          const rawPr=(S.current.pressureSensitivity&&ce.pointerType==='pen')?Math.pow(Math.max(0.01,ce.pressure),1.2):1
+          const pr=0.7*rawPr+0.3*smoothPrRef.current
+          smoothPrRef.current=pr
           const sz=Math.max(1,activeSize*pr)
-          // EMA smoothing (α=0.4): reduces hand tremor while keeping responsiveness
+          // Position EMA smoothing (α=0.4): reduces hand tremor while keeping responsiveness
           const prev=smoothPtRef.current??cpt
           const spt={x:alpha*cpt.x+(1-alpha)*prev.x,y:alpha*cpt.y+(1-alpha)*prev.y}
           smoothPtRef.current=spt
           if(wctx){
-            // ③ Pen: draw segment to wet canvas（lineWidthのみループ内でセット）
-            wctx.lineWidth=sz
-            wctx.beginPath();wctx.moveTo(lastPt.current.x,lastPt.current.y);wctx.lineTo(spt.x,spt.y);wctx.stroke()
-            // ② Store point for Catmull-Rom re-render at stroke end
-            strokePtsRef.current.push({x:spt.x,y:spt.y,sz})
-            // ① dirty rect をローカル変数に累積（ループごとのオブジェクト生成を廃止）
-            const _dm2=sz/2+2,_lx=lastPt.current.x,_ly=lastPt.current.y
-            drx0=Math.min(drx0,Math.max(0,Math.floor(Math.min(_lx,spt.x)-_dm2)))
-            dry0=Math.min(dry0,Math.max(0,Math.floor(Math.min(_ly,spt.y)-_dm2)))
-            drx1=Math.max(drx1,Math.min(cvRef.current.w,Math.ceil(Math.max(_lx,spt.x)+_dm2)))
-            dry1=Math.max(dry1,Math.min(cvRef.current.h,Math.ceil(Math.max(_ly,spt.y)+_dm2)))
+            // ③ Pen: midpoint quadratic bezier subdivided into short segments with interpolated width.
+            // Each sub-segment transitions smoothly from prevSz to sz → true tapered stroke.
+            const mx=(lastPt.current.x+spt.x)*0.5,my=(lastPt.current.y+spt.y)*0.5
+            const _px=prevMidRef.current.x,_py=prevMidRef.current.y
+            const _lx=lastPt.current.x,_ly=lastPt.current.y
+            const szStart=prevSzRef.current,szEnd=sz
+            // Subdivide bezier; 1 step per ~6px keeps quality while limiting draw calls
+            const segLen=Math.hypot(mx-_px,my-_py)
+            const N=Math.max(1,Math.round(segLen/6))
+            for(let i=0;i<N;i++){
+              const t1=i/N,t2=(i+1)/N
+              const mt1=1-t1,mt2=1-t2
+              const bx1=mt1*mt1*_px+2*mt1*t1*_lx+t1*t1*mx
+              const by1=mt1*mt1*_py+2*mt1*t1*_ly+t1*t1*my
+              const bx2=mt2*mt2*_px+2*mt2*t2*_lx+t2*t2*mx
+              const by2=mt2*mt2*_py+2*mt2*t2*_ly+t2*t2*my
+              wctx.lineWidth=Math.max(1,szStart+(szEnd-szStart)*(t1+t2)*0.5)
+              wctx.beginPath();wctx.moveTo(bx1,by1);wctx.lineTo(bx2,by2);wctx.stroke()
+            }
+            prevMidRef.current={x:mx,y:my}
+            prevSzRef.current=sz
+            // dirty rect: convex hull of start, control, end (+ stroke radius margin)
+            const _dm2=sz/2+2
+            drx0=Math.min(drx0,Math.max(0,Math.floor(Math.min(_px,_lx,mx)-_dm2)))
+            dry0=Math.min(dry0,Math.max(0,Math.floor(Math.min(_py,_ly,my)-_dm2)))
+            drx1=Math.max(drx1,Math.min(cvRef.current.w,Math.ceil(Math.max(_px,_lx,mx)+_dm2)))
+            dry1=Math.max(dry1,Math.min(cvRef.current.h,Math.ceil(Math.max(_py,_ly,my)+_dm2)))
           } else if(!isPen){
             // Eraser: draw segment to layer canvas
             ctx.globalCompositeOperation='destination-out'
@@ -1788,12 +2143,20 @@ export default function App() {
     const draw=S.current.activeLayerId===PHOTO_ID?photoLayerCanvas.current:layerCanvases.current[S.current.activeLayerId]
     if(activeTool===TOOLS.RULER){return}
     if(activeTool===TOOLS.SELECT){
-      if(selMoveStart.current){selMoveStart.current=null;selMoveSnap.current=null;selMoveOrigR.current=null;comp();tick()}
-      else if(selPtsRef.current.length>1){
+      const mode=selModeRef.current
+      if(selMoveStart.current){
+        selMoveStart.current=null;selMoveSnap.current=null;selMoveOrigR.current=null;saveHist();comp();tick()
+      } else if(mode==='rect'&&selRectStartRef.current){
+        selRectStartRef.current=null
+        if(!selRef.current||selRef.current.w<2||selRef.current.h<2)setSel(null)
+        comp();tick()
+      } else if(mode==='lasso'&&selPtsRef.current.length>1){
         const pts=[...selPtsRef.current,selPtsRef.current[0]]
         const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y)
         const x=Math.min(...xs),y=Math.min(...ys),w=Math.max(...xs)-x,h=Math.max(...ys)-y
         setSel({pts,x,y,w,h});comp();selPtsRef.current=[]
+      } else {
+        selPtsRef.current=[]
       }
       return
     }
@@ -1825,42 +2188,16 @@ export default function App() {
       saveHist();return
     }
     if(activeTool===TOOLS.PEN||activeTool===TOOLS.ERASER){
-      if(activeTool===TOOLS.PEN&&draw){
-        const {w:cw,h:ch}=cvRef.current
-        const pts=strokePtsRef.current
-        if(!penUsedShiftRef.current&&pts.length>0&&penShiftSnapRef.current){
-          // ② Catmull-Rom: restore the pre-stroke layer state and re-render the stored vector
-          // path with smooth cubic bezier curves — eliminates the EMA stepping artifacts.
-          // Control points: cp1 = P1 + (P2−P0)/6,  cp2 = P2 − (P3−P1)/6
-          const lctx=draw.getContext('2d')
-          lctx.clearRect(0,0,cw,ch);lctx.drawImage(penShiftSnapRef.current,0,0)
-          lctx.globalCompositeOperation='source-over'
-          const pc=S.current.penColor;lctx.lineCap='round';lctx.lineJoin='round'
-          lctx.strokeStyle=pc;lctx.fillStyle=pc
-          // Starting dot
-          lctx.beginPath();lctx.arc(pts[0].x,pts[0].y,pts[0].sz/2,0,Math.PI*2);lctx.fill()
-          // Catmull-Rom segments as cubic bezier curves.
-          // Segments with the same lineWidth are batched into one path to minimise stroke() calls.
-          // Varying pressure changes lineWidth → flush the batch when width changes significantly.
-          let batchW=-1
-          for(let i=1;i<pts.length;i++){
-            const p0=pts[Math.max(0,i-2)],p1=pts[i-1],p2=pts[i],p3=pts[Math.min(pts.length-1,i+1)]
-            const segW=(p1.sz+p2.sz)/2
-            if(Math.abs(segW-batchW)>0.5){
-              // flush previous batch
-              if(batchW>=0)lctx.stroke()
-              lctx.lineWidth=segW;batchW=segW
-              lctx.beginPath();lctx.moveTo(p1.x,p1.y)
-            }
-            const cp1x=p1.x+(p2.x-p0.x)/6,cp1y=p1.y+(p2.y-p0.y)/6
-            const cp2x=p2.x-(p3.x-p1.x)/6,cp2y=p2.y-(p3.y-p1.y)/6
-            lctx.bezierCurveTo(cp1x,cp1y,cp2x,cp2y,p2.x,p2.y)
-            if(i===pts.length-1)lctx.stroke()  // flush last batch
-          }
-        } else if(wetCanvasRef.current){
-          // Fallback (shift-snap stroke, or single dot with no points array): commit wet canvas
-          draw.getContext('2d').drawImage(wetCanvasRef.current,0,0)
+      if(activeTool===TOOLS.PEN&&draw&&wetCanvasRef.current){
+        // Flush the final bezier segment: prevMid → lastPt (the actual pen-lift point)
+        if(prevMidRef.current&&lastPt.current){
+          const wctx=wetCanvasRef.current.getContext('2d')
+          const {penColor:pc,penSize:ps}=S.current
+          wctx.strokeStyle=pc;wctx.lineCap='round';wctx.lineJoin='round'
+          wctx.lineWidth=Math.max(1,ps*smoothPrRef.current)
+          wctx.beginPath();wctx.moveTo(prevMidRef.current.x,prevMidRef.current.y);wctx.lineTo(lastPt.current.x,lastPt.current.y);wctx.stroke()
         }
+        draw.getContext('2d').drawImage(wetCanvasRef.current,0,0)
       }
       strokePtsRef.current=[]
       dirtyRectRef.current=null
@@ -1868,7 +2205,7 @@ export default function App() {
       saveHist()
       comp();tick()
     } else if(activeTool===TOOLS.MOVE){saveHist()}
-    penShiftSnapRef.current=null;smoothPtRef.current=null;penUsedShiftRef.current=false
+    penShiftSnapRef.current=null;smoothPtRef.current=null;smoothPrRef.current=1;prevMidRef.current=null;prevSzRef.current=1;penUsedShiftRef.current=false
     const ctx2=draw?.getContext('2d');if(ctx2)ctx2.globalCompositeOperation='source-over'
     moveSnap.current=null;lastPt.current=null
   }
@@ -1894,28 +2231,32 @@ export default function App() {
   const deleteInSel=()=>{
     const {w:cw,h:ch}=cvRef.current
     if(!selRef.current)return;const draw=getActiveCanvas();if(!draw)return
-    saveHist();const ctx=draw.getContext('2d');ctx.save();applySelClip(ctx,selRef.current);ctx.clearRect(0,0,cw,ch);ctx.restore();comp();tick()
+    const ctx=draw.getContext('2d');ctx.save();applySelClip(ctx,selRef.current);ctx.clearRect(0,0,cw,ch);ctx.restore()
+    saveHist();comp();tick()
   }
   const deleteOutSel=()=>{
     const {w:cw,h:ch}=cvRef.current
     if(!selRef.current)return;const draw=getActiveCanvas();if(!draw)return
-    saveHist();const ctx=draw.getContext('2d')
+    const ctx=draw.getContext('2d')
     const tmp=document.createElement('canvas');tmp.width=cw;tmp.height=ch;tmp.getContext('2d').drawImage(draw,0,0)
-    ctx.clearRect(0,0,cw,ch);ctx.save();applySelClip(ctx,selRef.current);ctx.drawImage(tmp,0,0);ctx.restore();comp();tick()
+    ctx.clearRect(0,0,cw,ch);ctx.save();applySelClip(ctx,selRef.current);ctx.drawImage(tmp,0,0);ctx.restore()
+    saveHist();comp();tick()
   }
   const fillSel=()=>{
     const {w:cw,h:ch}=cvRef.current
     if(!selRef.current)return;const draw=getActiveCanvas();if(!draw)return
-    saveHist();const ctx=draw.getContext('2d')
+    const ctx=draw.getContext('2d')
     ctx.save();ctx.globalCompositeOperation='source-over';ctx.fillStyle=S.current.penColor
-    applySelClip(ctx,selRef.current);ctx.fillRect(0,0,cw,ch);ctx.restore();comp();tick()
+    applySelClip(ctx,selRef.current);ctx.fillRect(0,0,cw,ch);ctx.restore()
+    saveHist();comp();tick()
   }
   const startTransform=()=>{
     const {w:cw,h:ch}=cvRef.current
     if(!selRef.current)return;const draw=getActiveCanvas();if(!draw)return
     const r=selRef.current;const content=document.createElement('canvas');content.width=cw;content.height=ch
     content.getContext('2d').drawImage(draw,0,0)
-    saveHist();const ctx=draw.getContext('2d');ctx.save();applySelClip(ctx,r);ctx.clearRect(0,0,cw,ch);ctx.restore()
+    // saveHistは確定(commitXf)後に呼ぶ。ここで呼ぶと変更前の状態が重複して積まれ、redoが機能しない。
+    const ctx=draw.getContext('2d');ctx.save();applySelClip(ctx,r);ctx.clearRect(0,0,cw,ch);ctx.restore()
     setXfState({rect:{x:r.x,y:r.y,w:r.w,h:r.h},angle:0,content,origRect:{x:r.x,y:r.y,w:r.w,h:r.h},origSel:{...r}});comp()
   }
   const updateXf=useCallback(patch=>{setXfState(prev=>{const next={...prev,...patch};xfRef.current=next;setTimeout(()=>compRef.current?.(),0);return next})},[])
@@ -1934,7 +2275,7 @@ export default function App() {
       ctx.drawImage(content,(or||rect).x,(or||rect).y,(or||rect).w,(or||rect).h,-rect.w/2,-rect.h/2,rect.w,rect.h)
       ctx.restore()
     }
-    setXfState(null);setSel(null);comp();tick()
+    setXfState(null);setSel(null);saveHist();comp();tick()
   }
   const cancelXf=()=>{
     if(!xfRef.current)return;const{origRect,content}=xfRef.current
@@ -1950,7 +2291,7 @@ export default function App() {
     const st=histStacks.current[key];if(!st)return
     const p=histPtrs.current[key]??0;if(p<=0)return
     histPtrs.current[key]=p-1
-    const c=getCanvas(key);if(c)c.getContext('2d').putImageData(st[p-1],0,0)
+    const c=getCanvas(key);if(c){const cx=c.getContext('2d');cx.clearRect(0,0,c.width,c.height);cx.drawImage(st[p-1],0,0)}
     comp();tick()
   }
   const doRedo=()=>{
@@ -1958,7 +2299,7 @@ export default function App() {
     const st=histStacks.current[key];if(!st)return
     const p=histPtrs.current[key]??0;if(p>=st.length-1)return
     histPtrs.current[key]=p+1
-    const c=getCanvas(key);if(c)c.getContext('2d').putImageData(st[p+1],0,0)
+    const c=getCanvas(key);if(c){const cx=c.getContext('2d');cx.clearRect(0,0,c.width,c.height);cx.drawImage(st[p+1],0,0)}
     comp();tick()
   }
   doUndoRef.current=doUndo;doRedoRef.current=doRedo
@@ -1979,15 +2320,15 @@ export default function App() {
     },
     undo:     ()=>doUndoRef.current?.(),
     redo:     ()=>doRedoRef.current?.(),
-    sizeUp:   ()=>{const t=S.current.activeTool;if(t===TOOLS.ERASER)setEraserSize(v=>Math.min(200,v+5));else setPenSize(v=>Math.min(100,v+2))},
-    sizeDn:   ()=>{const t=S.current.activeTool;if(t===TOOLS.ERASER)setEraserSize(v=>Math.max(1,v-5));else setPenSize(v=>Math.max(1,v-1))},
+    sizeUp:   ()=>{const t=S.current.activeTool;if(t===TOOLS.ERASER)setEraserSize(v=>Math.min(200,v+1));else setPenSize(v=>Math.min(100,v+1))},
+    sizeDn:   ()=>{const t=S.current.activeTool;if(t===TOOLS.ERASER)setEraserSize(v=>Math.max(1,v-1));else setPenSize(v=>Math.max(1,v-1))},
     grid:     ()=>setShowGrid(v=>!v),
     flipH:     ()=>{setFlipPhoto(v=>!v);setFlipDraw(v=>!v)},
     flipPhoto: ()=>setFlipPhoto(v=>!v),
     flipDraw:  ()=>setFlipDraw(v=>!v),
     fitScreen:()=>{setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}},
-    zoomIn:      ()=>setViewZoom(v=>Math.min(400,Math.round(v*1.1))),
-    zoomOut:     ()=>setViewZoom(v=>Math.max(20,Math.round(v/1.1))),
+    zoomIn:      ()=>setViewZoom(v=>Math.min(900,Math.round(v*1.1*10)/10)),
+    zoomOut:     ()=>setViewZoom(v=>Math.max(5,Math.round(v/1.1*10)/10)),
     rotateCanvas: ()=>setActiveTool(TOOLS.ROTATE),
     rotateReset:  ()=>{viewRotationRef.current=0;setViewRotation(0)},
     overlay:     ()=>{if(S.current.practiceMode)setPracticeOverlay(v=>!v);else setRefOverlay(v=>!v)},
@@ -2004,6 +2345,9 @@ export default function App() {
       // Live key monitor (shortcut panel open)
       if(showShortcutPanelRef.current)setLiveKey(fullKey)
       // Shortcut capture mode – allow any key including combos; Escape cancels
+      if(e.key==='Escape'&&selPolyInProgRef.current.length>0){
+        selPolyInProgRef.current=[];selPolyCursorRef.current=null;compRef.current?.();return
+      }
       if(scLearningRef.current){
         if(e.key==='Escape'){scLearningRef.current=null;setScLearning(null);return}
         // ignore lone modifier presses
@@ -2132,8 +2476,8 @@ export default function App() {
       }
       else if(sc.undo&&fullKey===sc.undo){doUndoRef.current()}
       else if(sc.redo&&fullKey===sc.redo){doRedoRef.current()}
-      else if(sc.zoomIn&&fullKey===sc.zoomIn){setViewZoom(v=>Math.min(400,Math.round(v*1.1)))}
-      else if(sc.zoomOut&&fullKey===sc.zoomOut){setViewZoom(v=>Math.max(20,Math.round(v/1.1)))}
+      else if(sc.zoomIn&&fullKey===sc.zoomIn){setViewZoom(v=>Math.min(900,Math.round(v*1.1*10)/10))}
+      else if(sc.zoomOut&&fullKey===sc.zoomOut){setViewZoom(v=>Math.max(5,Math.round(v/1.1*10)/10))}
       else if(sc.rotateReset&&fullKey===sc.rotateReset){viewRotationRef.current=0;setViewRotation(0)}
     }
     const onKeyUp=e=>{
@@ -2184,10 +2528,15 @@ export default function App() {
       setTabmateLearning(null)
       return
     }
-    // ── Releases → spring restore ─────────────────────────────────
+    // ── Releases → spring restore / hold-repeat stop ─────────────
     for(const {i} of releases){
       const prevVal = prev?.[i]; if(!prevVal) continue
       const btnKey = `${rid}:${i}:${prevVal}`
+      if(tabmateHoldRepeatRef.current?.btnKey===btnKey){
+        clearTimeout(tabmateHoldRepeatRef.current.timeoutId)
+        clearInterval(tabmateHoldRepeatRef.current.intervalId)
+        tabmateHoldRepeatRef.current = null
+      }
       if(tabmateSpringRef.current?.btnKey===btnKey){
         const fromTool = tabmateSpringRef.current.from
         tabmateSpringRef.current = null
@@ -2206,11 +2555,21 @@ export default function App() {
         document.querySelector('.tabmate-row.tabmate-flash')?.classList.remove('tabmate-flash')
       },1500)
     }
+    const HOLD_REPEAT_ACTIONS = new Set(['sizeUp','sizeDn','zoomIn','zoomOut'])
     for(const {i,v} of presses){
       const btnKey = `${rid}:${i}:${v}`
       const action = tabmateMappingsRef.current[btnKey]; if(!action) continue
-      const mt = getModeType(shortcutModesRef.current, action)
       flash(action)
+      if(HOLD_REPEAT_ACTIONS.has(action)){
+        tabmateActionsRef.current[action]?.()
+        const rec = {btnKey, timeoutId:null, intervalId:null}
+        tabmateHoldRepeatRef.current = rec
+        rec.timeoutId = setTimeout(()=>{
+          rec.intervalId = setInterval(()=>{ tabmateActionsRef.current[action]?.() }, 80)
+        }, 350)
+        continue
+      }
+      const mt = getModeType(shortcutModesRef.current, action)
       if(mt==='hold'){
         if(!tabmateSpringRef.current){
           tabmateSpringRef.current = {btnKey, from: S.current.activeTool}
@@ -2254,6 +2613,11 @@ export default function App() {
     const dev = tabmateDeviceRef.current; if(!dev) return
     dev.removeEventListener('inputreport', handleTabmateReport)
     try{ if(dev.opened) await dev.close() } catch{}
+    if(tabmateHoldRepeatRef.current){
+      clearTimeout(tabmateHoldRepeatRef.current.timeoutId)
+      clearInterval(tabmateHoldRepeatRef.current.intervalId)
+      tabmateHoldRepeatRef.current = null
+    }
     tabmateDeviceRef.current = null
     setTabmateConnected(false)
   },[handleTabmateReport])
@@ -2362,8 +2726,9 @@ export default function App() {
       c.width=nw;c.height=nh
       const ctx=c.getContext('2d');ctx.clearRect(0,0,nw,nh)
       if(+id===PAPER_ID){ctx.fillStyle='#ffffff';ctx.fillRect(0,0,nw,nh)}
-      const blank=ctx.getImageData(0,0,nw,nh)
-      histStacks.current[String(id)]=[blank];histPtrs.current[String(id)]=0
+      const blankC=document.createElement('canvas');blankC.width=nw;blankC.height=nh
+      blankC.getContext('2d').drawImage(c,0,0)
+      histStacks.current[String(id)]=[blankC];histPtrs.current[String(id)]=0
     })
     lastHistKey.current=null;setRev(r=>r+1)
   }
@@ -2386,8 +2751,10 @@ export default function App() {
   const updLayer=useCallback((id,patch)=>setLayers(p=>p.map(l=>l.id===id?{...l,...patch}:l)),[])
   const resetAllLayers=useCallback(()=>{
     if(!photoLayerCanvas.current||!histStacks.current[PHOTO_ID]?.[0])return
-    photoLayerCanvas.current.getContext('2d').putImageData(histStacks.current[PHOTO_ID][0],0,0)
-    histStacks.current[PHOTO_ID]=[histStacks.current[PHOTO_ID][0]];histPtrs.current[PHOTO_ID]=0
+    const first=histStacks.current[PHOTO_ID][0]
+    const plc=photoLayerCanvas.current,pc=plc.getContext('2d')
+    pc.clearRect(0,0,plc.width,plc.height);pc.drawImage(first,0,0)
+    histStacks.current[PHOTO_ID]=[first];histPtrs.current[PHOTO_ID]=0
     lastHistKey.current=null;comp()
   },[comp])
   const clearActive=useCallback(()=>{
@@ -2481,35 +2848,6 @@ export default function App() {
     document.addEventListener('touchend',onEnd)
   },[setActiveLayerId,setLayers])
 
-  const onPanelGrab=useCallback((srcIdx,e)=>{
-    e.preventDefault();e.stopPropagation()
-    panelDragRef.current={idx:srcIdx,dropIdx:srcIdx,startY:e.clientY,moved:false}
-    setPanelDragSrc(srcIdx)
-    const onMove=ev=>{
-      if(Math.abs(ev.clientY-panelDragRef.current.startY)>4)panelDragRef.current.moved=true
-      const el=document.querySelector('.sidebar-col');if(!el)return
-      const panels=[...el.querySelectorAll('.panel-section')]
-      let drop=panels.length-1
-      for(let i=0;i<panels.length;i++){
-        const r=panels[i].getBoundingClientRect()
-        if(ev.clientY<r.top+r.height/2){drop=i;break}
-      }
-      panelDragRef.current.dropIdx=drop;setPanelDropIdx(drop)
-    }
-    const onUp=()=>{
-      const{idx:src,dropIdx:dst,moved}=panelDragRef.current
-      panelDragRef.current={idx:null,dropIdx:null,startY:0,moved:false}
-      setPanelDragSrc(null);setPanelDropIdx(null)
-      if(moved&&src!==null&&dst!==null&&src!==dst){
-        setPanelOrder(prev=>{const a=[...prev];const[item]=a.splice(src,1);a.splice(dst>src?dst-1:dst,0,item);return a})
-      }
-      document.removeEventListener('mousemove',onMove)
-      document.removeEventListener('mouseup',onUp)
-    }
-    document.addEventListener('mousemove',onMove)
-    document.addEventListener('mouseup',onUp)
-  },[])
-
   // ── Crop helpers ──────────────────────────────────────────────
   const startCrop=()=>{
     const {w:cw,h:ch}=cvRef.current
@@ -2536,20 +2874,24 @@ export default function App() {
     if(cw>0&&newW!==cw){const sc=newW/cw;setGridSize(v=>v>0?Math.max(1,Math.round(v*sc)):v)}
     // resize layer canvases, preserve drawing aligned with crop region
     Object.entries(layerCanvases.current).forEach(([id,c])=>{
-      const savedData=c.getContext('2d').getImageData(x1+cw/2,y1,cropW,cropH)
+      const tmpC=document.createElement('canvas');tmpC.width=cropW;tmpC.height=cropH
+      tmpC.getContext('2d').drawImage(c,x1+cw/2,y1,cropW,cropH,0,0,cropW,cropH)
       c.width=newW;c.height=newH
       const ctx=c.getContext('2d')
       if(+id===PAPER_ID){ctx.fillStyle='#fff';ctx.fillRect(0,0,newW,newH)}
-      ctx.putImageData(savedData,newW/2,0)
-      const blank=ctx.getImageData(0,0,newW,newH)
-      histStacks.current[String(id)]=[blank];histPtrs.current[String(id)]=0
+      ctx.drawImage(tmpC,0,0,cropW,cropH,newW/2,0,cropW,cropH)
+      const blankC=document.createElement('canvas');blankC.width=newW;blankC.height=newH
+      blankC.getContext('2d').drawImage(c,0,0)
+      histStacks.current[String(id)]=[blankC];histPtrs.current[String(id)]=0
     })
     if(!photoLayerCanvas.current)photoLayerCanvas.current=document.createElement('canvas')
     const plc=photoLayerCanvas.current;plc.width=newW;plc.height=newH
     const pctx=plc.getContext('2d');pctx.clearRect(0,0,newW,newH)
     pctx.drawImage(img,sx,sy,snw,snh,0,0,newW/2,newH)
     photoRenderRectRef.current={x:0,y:0,w:newW/2,h:newH}
-    histStacks.current[PHOTO_ID]=[pctx.getImageData(0,0,newW,newH)];histPtrs.current[PHOTO_ID]=0
+    const photoSnap2=document.createElement('canvas');photoSnap2.width=newW;photoSnap2.height=newH
+    photoSnap2.getContext('2d').drawImage(plc,0,0)
+    histStacks.current[PHOTO_ID]=[photoSnap2];histPtrs.current[PHOTO_ID]=0
     setAppliedCrop({origRR,origW:cw,origH:ch})
     setCropMode(false);setCropRect(null)
     setRev(r=>r+1)
@@ -2565,15 +2907,18 @@ export default function App() {
       c.width=origW;c.height=origH
       const ctx=c.getContext('2d')
       if(+id===PAPER_ID){ctx.fillStyle='#fff';ctx.fillRect(0,0,origW,origH)}
-      const blank=ctx.getImageData(0,0,origW,origH)
-      histStacks.current[String(id)]=[blank];histPtrs.current[String(id)]=0
+      const blankC=document.createElement('canvas');blankC.width=origW;blankC.height=origH
+      blankC.getContext('2d').drawImage(c,0,0)
+      histStacks.current[String(id)]=[blankC];histPtrs.current[String(id)]=0
     })
     if(!photoLayerCanvas.current)photoLayerCanvas.current=document.createElement('canvas')
     const plc=photoLayerCanvas.current;plc.width=origW;plc.height=origH
     const pctx=plc.getContext('2d');pctx.clearRect(0,0,origW,origH)
     pctx.drawImage(img,origRR.x,origRR.y,origRR.w,origRR.h)
     photoRenderRectRef.current={...origRR}
-    histStacks.current[PHOTO_ID]=[pctx.getImageData(0,0,origW,origH)];histPtrs.current[PHOTO_ID]=0
+    const photoSnap3=document.createElement('canvas');photoSnap3.width=origW;photoSnap3.height=origH
+    photoSnap3.getContext('2d').drawImage(plc,0,0)
+    histStacks.current[PHOTO_ID]=[photoSnap3];histPtrs.current[PHOTO_ID]=0
     setAppliedCrop(null)
     setRev(r=>r+1)
   }
@@ -2625,8 +2970,9 @@ export default function App() {
       c.width=nw;c.height=nh
       const ctx=c.getContext('2d')
       if(+id===PAPER_ID){ctx.fillStyle='#fff';ctx.fillRect(0,0,nw,nh)}
-      const blank=ctx.getImageData(0,0,nw,nh)
-      histStacks.current[String(id)]=[blank];histPtrs.current[String(id)]=0
+      const blankC=document.createElement('canvas');blankC.width=nw;blankC.height=nh
+      blankC.getContext('2d').drawImage(c,0,0)
+      histStacks.current[String(id)]=[blankC];histPtrs.current[String(id)]=0
     })
     lastHistKey.current=null;setRev(r=>r+1)
   },[])
@@ -2648,9 +2994,6 @@ export default function App() {
             <button className="app-menu-item" onClick={()=>{setLeftHanded(v=>!v);setShowMenu(false)}}>
               {leftHanded?'右利きモード（通常）':'左利きモード（左右反転）'}
             </button>
-            <button className="app-menu-item" onClick={()=>{setEditToolLayout(true);setShowMenu(false)}}>
-              🔧 配置をカスタマイズ
-            </button>
             <div className="app-menu-sep"/>
             <button className={`app-menu-item${hardMode?' app-menu-item--active':''}`}
               onClick={()=>{setHardMode(v=>!v);setShowMenu(false)}}>
@@ -2667,14 +3010,6 @@ export default function App() {
         </div>
       )}
 
-      {editToolLayout&&(
-        <div className="tool-layout-bar">
-          <span>配置編集中 — ドラッグして並べ替え</span>
-          <button className="tl-btn" onClick={()=>setSidebarLeft(v=>!v)} title="サイドバーを左右に移動">{sidebarLeft?'サイドバー ▶ 右へ':'◀ 左へ'}</button>
-          <button className="tl-btn" onClick={()=>{setToolOrder([...TOOL_IDS]);localStorage.removeItem('tool-order')}} title="並び順をリセット">リセット</button>
-          <button className="tl-btn tl-btn-done" onClick={()=>setEditToolLayout(false)}>完了</button>
-        </div>
-      )}
 
       {showTabmatePanel&&(
         <div className="tabmate-overlay" onClick={()=>setShowTabmatePanel(false)}>
@@ -2881,12 +3216,32 @@ export default function App() {
         </div>
       )}
 
-      <SelectionStrip sel={_selRect} canvasEl={selCanvasEl} cvW={cvW} cvH={cvH} onDeselect={deselect}
-        onDelete={deleteInSel} onDeleteOut={deleteOutSel} onFill={fillSel} onTransform={startTransform}/>
+      {!xf&&<SelectionStrip sel={_selRect} canvasEl={selCanvasEl} cvW={cvW} cvH={cvH} onDeselect={deselect}
+        onDelete={deleteInSel} onDeleteOut={deleteOutSel} onFill={fillSel} onTransform={startTransform}/>}
       {xf&&<TransformOverlay xf={xf} canvasEl={xfCanvasEl} cvW={cvW} cvH={cvH} onUpdate={updateXf} onCommit={commitXf} onCancel={cancelXf}/>}
+
+      {(screenCapState==='selecting'||screenCapState==='active')&&screenCapVideoRef.current&&(
+        <ScreenCaptureSelectOverlay video={screenCapVideoRef.current} onConfirm={confirmScreenCapCrop} onCancel={stopScreenCapture} visible={screenCapState==='selecting'}/>
+      )}
 
       <header className="toolbar">
         <button className="menu-btn" onClick={()=>setShowMenu(v=>!v)} title="メニュー"><MenuIcon/></button>
+        {!practiceMode&&screenCapState==='active'&&<>
+          <div style={{width:1,background:'#555',margin:'0 2px',alignSelf:'stretch'}}/>
+          <span style={{width:7,height:7,borderRadius:'50%',background:'#f55',display:'inline-block',animation:'blink 1.2s step-start infinite',flexShrink:0}}/>
+          <span style={{color:'#888',fontSize:11,flexShrink:0,whiteSpace:'nowrap'}}>キャプチャ中</span>
+          {extConnected&&<span style={{fontSize:10,color:'#5a5',flexShrink:0,whiteSpace:'nowrap'}} title="FormTrace拡張機能: 接続済み">🔌</span>}
+          <button className={`pst-btn${screenCapInteract?' pst-active':''}`}
+            onClick={()=>setScreenCapInteract(v=>!v)}
+            title={screenCapInteract
+              ?(extConnected?'操作モード: ドラッグ→画面移動 / ホイール→スクロール転送 / Ctrl+ホイール→拡大縮小 / クリック→ボタン転送':'操作モード: ドラッグ→画面移動 / ホイール→拡大縮小')
+              :'描画モード: 通常の描画'}>
+            {screenCapInteract?'↕ 操作':'✎ 描画'}
+          </button>
+          <button className="pst-btn" onClick={()=>setScreenCapState('selecting')} title="範囲を再選択">範囲変更</button>
+          <button className="pst-btn" onClick={stopScreenCapture} style={{color:'#f88'}}>停止</button>
+          <div style={{width:1,background:'#555',margin:'0 2px',alignSelf:'stretch'}}/>
+        </>}
         {practiceMode&&<>
           <button className={`pst-btn${practiceCategory==='3d'?' pst-active':''}`}
             onClick={()=>{if(practiceCategory==='3d')return;setPracticeCategory('3d');const o=genCompound();practiceObjRef.current=o;setPracticeObject({...o});const phi=.18+o.ep*.52,theta=o.rot*8+o.skX*3;setPracticeOrbit({rx:phi,ry:theta,rz:0,zoom:1})}}>立体</button>
@@ -2921,15 +3276,10 @@ export default function App() {
         <div className="tb-spacer"/>
         <div className="toolbar-right">
           <div className="toolbar-tools">
-            {toolOrder.map((id,idx)=>{
+            {TOOL_IDS.map(id=>{
               if(id!=='pen'&&hardMode)return null
-              const isDragging=toolDragSrc===idx
-              const isDropTarget=toolDropIdx===idx&&toolDragSrc!==null&&toolDragSrc!==idx
               return(
-                <div key={id}
-                  className={`tool-drag-item${isDragging?' tool-dragging':''}${isDropTarget?' tool-drop-here':''}`}
-                  onPointerDown={editToolLayout?e=>onToolGrab(idx,e):undefined}
-                  style={editToolLayout?{cursor:'grab',outline:'2px dashed #6af',outlineOffset:'2px',borderRadius:4}:undefined}>
+                <div key={id}>
                   {makeToolButton(id)}
                 </div>
               )
@@ -2951,9 +3301,8 @@ export default function App() {
       <div className="main">
         <div className="content">
           <div className="draw-area" ref={drawAreaRef}>
-            {editToolLayout&&<div className="customize-canvas-block" title="カスタマイズモード中は描画できません"><span>カスタマイズ中</span></div>}
             <div style={{position:'absolute',inset:4,display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
-              <div style={{position:'relative',flexShrink:0,
+              <div ref={canvasDivRef} style={{position:'relative',flexShrink:0,
                 width:dispSize.w||cvW,height:dispSize.h||cvH,
                 transform:`translate(${panOffset.x}px,${panOffset.y}px) scale(${viewZoom/100}) rotate(${viewRotation}deg)`,
                 transformOrigin:'center'}}>
@@ -3008,7 +3357,7 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {!practiceMode&&!refImage&&(
+                {!practiceMode&&!refImage&&screenCapState!=='active'&&(
                   <div className={`drop-zone${photoAreaDragOver?' drag-over':''}`}
                     style={{position:'absolute',top:0,left:0,width:'50%',height:'100%'}}
                     onDragOver={e=>{e.preventDefault();setPhotoAreaDragOver(true)}}
@@ -3027,7 +3376,18 @@ export default function App() {
                     </div>
                     {urlError&&<div className="url-err-box">{URL_ERR[urlError].split('\n').map((l,i)=><p key={i}>{l}</p>)}</div>}
                     <button className="practice-start-btn" onClick={startPractice}>✦ フォーム練習</button>
+                    <button className="practice-start-btn" style={{marginTop:6,background:'rgba(60,100,160,0.18)',borderColor:'rgba(80,140,220,0.5)',color:'#8ab4f8'}} onClick={startScreenCapture}>⬛ 画面キャプチャ</button>
                   </div>
+                )}
+                {!practiceMode&&screenCapState==='active'&&screenCapInteract&&(
+                  <div style={{position:'absolute',top:0,left:0,width:'50%',height:'100%',
+                    cursor:'grab',zIndex:12,touchAction:'none'}}
+                    onPointerDown={onCapInteractDown}
+                    onPointerMove={onCapInteractMove}
+                    onPointerUp={onCapInteractUp}
+                    onPointerCancel={onCapInteractCancel}
+                    onWheel={onCapInteractZoom}
+                    title="ドラッグ: 画面移動 / ホイール: 拡大縮小"/>
                 )}
               </div>
             </div>
@@ -3045,11 +3405,11 @@ export default function App() {
               <span className="bb-sep"/>
             </>}
             <label className="bb-label">表示</label>
-            <input type="range" min="20" max="400" value={viewZoom} onChange={e=>setViewZoom(+e.target.value)} className="zoom-slider" title="表示サイズ"/>
-            <span className="bb-val">{viewZoom}%</span>
+            <input type="range" min="5" max="900" step="0.1" value={viewZoom} onChange={e=>setViewZoom(+e.target.value)} className="zoom-slider" title="表示サイズ"/>
+            <span className="bb-val">{viewZoom<=5?0:Math.round(viewZoom*10)/10}%</span>
             <div className="num-spin-arrows" style={{height:20}}>
-              <button className="num-spin-up" onClick={()=>setViewZoom(v=>Math.min(400,v+1))}/>
-              <button className="num-spin-dn" onClick={()=>setViewZoom(v=>Math.max(20,v-1))}/>
+              <button className="num-spin-up" onClick={()=>setViewZoom(v=>Math.min(900,Math.round(v*1.1*10)/10))}/>
+              <button className="num-spin-dn" onClick={()=>setViewZoom(v=>Math.max(5,Math.round(v/1.1*10)/10))}/>
             </div>
             {(viewZoom!==100||panOffset.x!==0||panOffset.y!==0)&&<button className="bb-reset-btn" onClick={()=>{setViewZoom(100);setPanOffset({x:0,y:0});panOffsetRef.current={x:0,y:0}}} title="表示位置・拡大率をリセット">⟳</button>}
             {viewRotation!==0&&<>
@@ -3061,7 +3421,7 @@ export default function App() {
             <button className={`bb-crop-btn${flipDraw?' bb-crop-reset':''}`} onClick={()=>setFlipDraw(v=>!v)} title="描画エリアを左右反転"><FlipHIcon/></button>
             <button className={`bb-crop-btn${flipPhoto&&flipDraw?' bb-crop-reset':''}`} onClick={()=>{const b=!(flipPhoto&&flipDraw);setFlipPhoto(b);setFlipDraw(b)}} title="両方を左右反転"><FlipBothIcon/></button>
             <div style={{flex:1}}/>
-            {(refImage||practiceMode)&&(practiceMode?practiceOverlay:refOverlay)&&<>
+            {(refImage||practiceMode||screenCapState==='active')&&(practiceMode?practiceOverlay:refOverlay)&&<>
               <input type="range" min="0" max="100"
                 value={practiceMode?practiceOverlayOpacity:refOverlayOpacity}
                 onChange={e=>practiceMode?setPracticeOverlayOpacity(+e.target.value):setRefOverlayOpacity(+e.target.value)}
@@ -3074,7 +3434,7 @@ export default function App() {
                 <button className="num-spin-dn" onClick={()=>practiceMode?setPracticeOverlayOpacity(v=>Math.max(0,v-1)):setRefOverlayOpacity(v=>Math.max(0,v-1))}/>
               </div>
             </>}
-            {(refImage||practiceMode)&&<button className={`bb-crop-btn${(practiceMode?practiceOverlay:refOverlay)?' bb-crop-reset':''}`} onClick={()=>practiceMode?setPracticeOverlay(v=>!v):setRefOverlay(v=>!v)} title="描画パネルに重ねて表示"><OverlayIcon/></button>}
+            {(refImage||practiceMode||screenCapState==='active')&&<button className={`bb-crop-btn${(practiceMode?practiceOverlay:refOverlay)?' bb-crop-reset':''}`} onClick={()=>practiceMode?setPracticeOverlay(v=>!v):setRefOverlay(v=>!v)} title="描画パネルに重ねて表示"><OverlayIcon/></button>}
             {refImage&&!practiceMode&&<button className="bb-crop-btn" onClick={resetAllLayers} title="参考画像を初期状態にリセット" style={{color:'#e07070'}}><ResetIcon/></button>}
             {refImage&&!practiceMode&&(appliedCrop?(
               <button className="bb-crop-btn bb-crop-reset" onClick={resetCrop} title="切り取りを解除">切り取り解除</button>
@@ -3090,16 +3450,8 @@ export default function App() {
           </div>
         </div>
 
-        <div className={`sidebar-col${sidebarLeft?' sidebar-col--left':''}`}>
-            {panelOrder.map((panelId,idx)=>{
-              const isDragging=panelDragSrc===idx
-              const isDropTarget=panelDropIdx===idx&&panelDragSrc!==null&&panelDragSrc!==idx
-              const isLast=idx===panelOrder.length-1
-              const panelCls=`panel-section${isDragging?' panel-dragging':''}${isDropTarget?' panel-drop-here':''}`
-              const grabBar=editToolLayout&&<div className="panel-grab-full" onMouseDown={e=>onPanelGrab(idx,e)}><GrabIcon/><span>ドラッグして移動</span></div>
-              if(panelId==='nav')return(
-                <div key="nav" className={`nav-sidebar ${panelCls}`} style={isLast?{flex:1,overflow:'hidden'}:{}}>
-                  {grabBar}
+        <div className="sidebar-col">
+            <div key="nav" className="nav-sidebar panel-section">
                   <div className="pen-sidebar-hdr nav-hdr">
                     <span>ナビゲーター</span>
                     <div className="nav-hdr-btns">
@@ -3113,11 +3465,8 @@ export default function App() {
                     <canvas ref={navigatorRef} style={{width:'100%',display:'block',cursor:'crosshair'}}
                       onPointerDown={onNavDown} onPointerMove={onNavMove} onPointerUp={onNavUp}/>
                   </div>
-                </div>
-              )
-              if(panelId==='tool')return(
-                <aside key="tool" className={`pen-sidebar ${panelCls}`} style={isLast?{flex:1,overflowY:'auto'}:{}}>
-                  {grabBar}
+            </div>
+            <aside key="tool" className="pen-sidebar panel-section" style={{overflowY:'auto'}}>
                   {(activeTool===TOOLS.PEN)&&<>
                     <div className="pen-sidebar-hdr">ペン設定</div>
                     <div className="pen-sidebar-body tool-body">
@@ -3136,6 +3485,17 @@ export default function App() {
                         <input type="checkbox" checked={pressureSensitivity} onChange={e=>setPressureSensitivity(e.target.checked)}/>
                         <span>筆圧感知</span>
                       </label>
+                    </div>
+                  </>}
+                  {(activeTool===TOOLS.SELECT)&&!xf&&<>
+                    <div className="pen-sidebar-hdr">選択モード</div>
+                    <div className="pen-sidebar-body">
+                      <div className="sel-mode-btns">
+                        <button className={`sel-mode-btn${selMode==='rect'?' sel-mode-active':''}`} onClick={()=>setSelMode('rect')} title="矩形選択">矩形</button>
+                        <button className={`sel-mode-btn${selMode==='lasso'?' sel-mode-active':''}`} onClick={()=>{setSelMode('lasso');selPolyInProgRef.current=[];selPolyCursorRef.current=null}} title="フリーハンドで範囲指定">投げなわ</button>
+                        <button className={`sel-mode-btn${selMode==='poly'?' sel-mode-active':''}`} onClick={()=>{setSelMode('poly');selPtsRef.current=[]}} title="クリックで点を追加、最初の点に戻ると確定">折れ線</button>
+                      </div>
+                      {selMode==='poly'&&selPolyInProgRef.current.length>0&&<p className="sel-poly-hint">最初の点をクリックで確定 / Escでキャンセル</p>}
                     </div>
                   </>}
                   {(activeTool===TOOLS.ERASER)&&<>
@@ -3191,6 +3551,10 @@ export default function App() {
                           </div>
                         </div>
                       )}
+                      <div className="tool-size-row" style={{marginTop:6}}>
+                        <span className="tool-label">色</span>
+                        <input type="color" value={gridColor} onChange={e=>setGridColor(e.target.value)} className="color-wheel" style={{width:32,height:24,padding:1,cursor:'pointer'}}/>
+                      </div>
                       <div className="tool-size-row" style={{marginTop:6}}>
                         <span className="tool-label">濃度</span>
                         <input type="range" min="10" max="100" value={gridOpacity} onChange={e=>setGridOpacity(+e.target.value)} className="tool-slider"/>
@@ -3277,11 +3641,8 @@ export default function App() {
                       </div>
                     </>
                   })()}
-                </aside>
-              )
-              if(panelId==='layer')return(
-                <aside key="layer" className={`layer-sidebar ${panelCls}`} style={isLast?{flex:1,minHeight:0,overflow:'hidden'}:{maxHeight:'40vh',overflow:'hidden'}}>
-                  {grabBar}
+            </aside>
+            <aside key="layer" className="layer-sidebar panel-section" style={{flex:1,minHeight:0,overflow:'hidden'}}>
                   <div className="lp-header">
                     <span className="lp-title">レイヤー</span>
                     <div className="lp-actions">
@@ -3349,10 +3710,7 @@ export default function App() {
                       )
                     })}
                   </div>
-                </aside>
-              )
-              return null
-            })}
+            </aside>
           </div>
       </div>
       {/* custom cursor */}
