@@ -3,3 +3,8 @@ dist/
 .DS_Store
 
 .vercel
+
+# 環境変数（APIキーなどの機密情報）
+.env
+.env.local
+.env.*.local
